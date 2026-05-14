@@ -307,26 +307,27 @@ async def validate_tags(browser, url, index, total):
             err = str(e)
             results["Error"] = "Timeout" if "Timeout" in err else err[:80]
 
-        # Wait for cookie banner to appear briefly
-        await asyncio.sleep(1.5)
+        # Wait for cookie banner to appear
+        await asyncio.sleep(2)
 
         # Accept cookies
         cookie_accepted = await accept_cookies(page)
 
         # Wait for analytics tags to fire after consent
         try:
-            await page.wait_for_load_state("networkidle", timeout=8000)
+            await page.wait_for_load_state("networkidle", timeout=12000)
         except:
             pass
 
-        # Extra wait for late beacons
-        await asyncio.sleep(2.5)
+        # Extra wait — many sites fire analytics 3-5s after load
+        await asyncio.sleep(6)
 
         # ===== SCROLL to trigger lazy analytics =====
         try:
             await page.evaluate("window.scrollTo(0, document.body.scrollHeight / 3)")
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(1)
             await page.evaluate("window.scrollTo(0, 0)")
+            await asyncio.sleep(2)
         except:
             pass
 
