@@ -97,11 +97,11 @@ function renderTable() {
             <tr>
                 <th rowspan="2">#</th>
                 <th rowspan="2">URL</th>
-                <th colspan="5" class="h-teal" style="text-align:center;">TEALIUM</th>
+                <th colspan="4" class="h-teal" style="text-align:center;">TEALIUM</th>
                 <th colspan="3" class="h-adobe" style="text-align:center;">ADOBE ANALYTICS</th>
             </tr>
             <tr>
-                <th class="h-teal">Loaded</th><th class="h-teal">Account</th><th class="h-teal">Profile</th><th class="h-teal">Env</th><th class="h-teal">View Tag</th>
+                <th class="h-teal">Loaded</th><th class="h-teal">Account</th><th class="h-teal">Profile</th><th class="h-teal">Env</th>
                 <th class="h-adobe">Loaded</th><th class="h-adobe">Report Suite</th><th class="h-adobe">Page View</th>
             </tr>`;
     } else {
@@ -157,7 +157,6 @@ function renderTable() {
             <td>${ID(r.Tealium_Account)}</td>
             <td>${ID(r.Tealium_Profile)}</td>
             <td>${ID(r.Tealium_Env)}</td>
-            <td>${B(r.Tealium_View_Fired)}</td>
             <td>${B(r.Adobe_Loaded)}</td>
             <td>${ID(r.Adobe_ReportSuite)}</td>
             <td>${B(r.Adobe_PageView)}</td>

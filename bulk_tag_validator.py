@@ -179,7 +179,7 @@ async def validate_tags(browser, url, index, total):
     results = {
         "URL": url,
         "Tealium_Loaded": "FAIL", "Tealium_Account": "", "Tealium_Profile": "",
-        "Tealium_Env": "", "Tealium_View_Fired": "FAIL",
+        "Tealium_Env": "",
         "GTM_Loaded": "FAIL", "GTM_ID": "",
         "GA4_Fired": "FAIL", "GA4_Measurement_ID": "", "GA4_PageView": "FAIL",
         "Adobe_Loaded": "FAIL", "Adobe_ReportSuite": "", "Adobe_PageView": "FAIL",
@@ -487,7 +487,6 @@ async def validate_tags(browser, url, index, total):
 
         # ===== BUILD RESULTS =====
         results["Tealium_Loaded"] = "PASS" if flags["tealium_js"] else "FAIL"
-        results["Tealium_View_Fired"] = "PASS" if flags["tealium_collect"] else "FAIL"
         if tealium_accounts:
             results["Tealium_Account"] = tealium_accounts[0].get("account", "")
             results["Tealium_Profile"] = tealium_accounts[0].get("profile", "")
