@@ -12,7 +12,7 @@ import json
 from urllib.parse import unquote, parse_qs, urlparse
 
 stealth_obj = Stealth()
-CONCURRENCY = 8
+CONCURRENCY = 3
 
 COOKIE_SELECTORS = [
     '#onetrust-accept-btn-handler',
