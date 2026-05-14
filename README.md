@@ -1,10 +1,5 @@
 ---
-title: Tag Validator V2
-emoji: 🏃
-colorFrom: blue
-colorTo: green
+title: Tag Validator Pro
 sdk: docker
-pinned: false
+app_port: 7860
 ---
-
-Check out the configuration reference at https://huggingface.co/docs/hub/spaces-config-reference
