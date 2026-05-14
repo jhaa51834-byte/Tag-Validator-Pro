@@ -12,7 +12,7 @@ import json
 from urllib.parse import unquote, parse_qs, urlparse
 
 stealth_obj = Stealth()
-CONCURRENCY = 3
+CONCURRENCY = 8
 
 COOKIE_SELECTORS = [
     '#onetrust-accept-btn-handler',
@@ -307,27 +307,26 @@ async def validate_tags(browser, url, index, total):
             err = str(e)
             results["Error"] = "Timeout" if "Timeout" in err else err[:80]
 
-        # Wait for cookie banner to appear
-        await asyncio.sleep(2)
+        # Wait for cookie banner to appear briefly
+        await asyncio.sleep(1.5)
 
         # Accept cookies
         cookie_accepted = await accept_cookies(page)
 
         # Wait for analytics tags to fire after consent
         try:
-            await page.wait_for_load_state("networkidle", timeout=12000)
+            await page.wait_for_load_state("networkidle", timeout=8000)
         except:
             pass
 
-        # Extra wait — many sites fire analytics 3-5s after load
-        await asyncio.sleep(6)
+        # Extra wait for late beacons
+        await asyncio.sleep(2.5)
 
         # ===== SCROLL to trigger lazy analytics =====
         try:
             await page.evaluate("window.scrollTo(0, document.body.scrollHeight / 3)")
-            await asyncio.sleep(1)
+            await asyncio.sleep(0.5)
             await page.evaluate("window.scrollTo(0, 0)")
-            await asyncio.sleep(2)
         except:
             pass
 
