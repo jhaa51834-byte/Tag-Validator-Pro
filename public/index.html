@@ -9,23 +9,18 @@
         * { box-sizing: border-box; margin: 0; padding: 0; }
         :root {
             --bg: #0f172a; 
-            --card-bg: rgba(30, 41, 59, 0.7); 
-            --border: rgba(255, 255, 255, 0.1);
+            --card-bg: rgba(30, 41, 59, 0.4); 
+            --border: rgba(255, 255, 255, 0.08);
             --text: #f8fafc; 
             --muted: #94a3b8; 
             --accent: #8b5cf6; 
             --accent-glow: rgba(139, 92, 246, 0.5);
             --teal: #14b8a6; 
-            --teal-bg: rgba(20, 184, 166, 0.1); 
             --purple: #a855f7; 
-            --purple-bg: rgba(168, 85, 247, 0.1);
             --pink: #ec4899; 
-            --pink-bg: rgba(236, 72, 153, 0.1);
             --orange: #f97316; 
-            --orange-bg: rgba(249, 115, 22, 0.1);
-            --green: #22c55e; 
             --red: #ef4444;
-            --shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+            --shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4);
         }
 
         body { 
@@ -39,11 +34,8 @@
 
         /* Animated Background Orbs */
         .bg-orb {
-            position: fixed;
-            border-radius: 50%;
-            filter: blur(80px);
-            z-index: -1;
-            opacity: 0.5;
+            position: fixed; border-radius: 50%; filter: blur(80px);
+            z-index: -1; opacity: 0.5;
             animation: floatOrb 15s infinite alternate ease-in-out;
         }
         .orb-1 { width: 400px; height: 400px; background: rgba(139, 92, 246, 0.3); top: -10%; left: -10%; }
@@ -55,24 +47,19 @@
             100% { transform: translate(50px, 50px) scale(1.2); }
         }
 
-        /* Glassmorphism utility */
+        /* Glassmorphism */
         .glass {
-            background: rgba(30, 41, 59, 0.4);
-            backdrop-filter: blur(16px);
-            -webkit-backdrop-filter: blur(16px);
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            border-radius: 16px;
-            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4);
+            background: var(--card-bg);
+            backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+            border: 1px solid var(--border); border-radius: 16px;
+            box-shadow: var(--shadow);
         }
 
         .navbar {
             display: flex; align-items: center; justify-content: space-between;
-            padding: 16px 32px; 
-            border-bottom: 1px solid var(--border);
-            background: rgba(15, 23, 42, 0.8);
-            backdrop-filter: blur(12px);
-            position: sticky;
-            top: 0; z-index: 100;
+            padding: 16px 32px; border-bottom: 1px solid var(--border);
+            background: rgba(15, 23, 42, 0.8); backdrop-filter: blur(12px);
+            position: sticky; top: 0; z-index: 100;
         }
         .navbar .logo { display: flex; align-items: center; gap: 12px; }
         .navbar .logo-icon {
@@ -83,50 +70,31 @@
             box-shadow: 0 0 15px var(--accent-glow);
         }
         .navbar h1 { font-size: 1.2rem; font-weight: 700; letter-spacing: 0.5px; }
-        .navbar h1 span { 
-            background: linear-gradient(135deg, #a855f7, #ec4899); 
-            -webkit-background-clip: text; 
-            -webkit-text-fill-color: transparent; 
-        }
+        .navbar h1 span { background: linear-gradient(135deg, #a855f7, #ec4899); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
 
         .main { max-width: 1400px; margin: 0 auto; padding: 32px 24px; }
 
-        /* Mode Toggle */
-        .mode-toggle {
-            display: inline-flex; 
-            background: rgba(0,0,0,0.3); 
-            border-radius: 12px;
-            padding: 6px; gap: 6px; margin-bottom: 24px; 
-            border: 1px solid var(--border);
+        /* Tabs */
+        .tabs { display: flex; gap: 16px; margin-bottom: 24px; border-bottom: 1px solid var(--border); padding-bottom: 16px; }
+        .tab-btn {
+            background: transparent; color: var(--muted); border: none; font-size: 1.1rem; font-weight: 600;
+            cursor: pointer; transition: all 0.3s; padding: 8px 16px; border-radius: 8px; font-family: inherit;
         }
-        .mode-btn {
-            padding: 10px 24px; border-radius: 8px; border: none; cursor: pointer;
-            font-size: 0.85rem; font-weight: 600; color: var(--muted);
-            background: transparent; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-            font-family: inherit;
-        }
-        .mode-btn.active { 
-            background: rgba(255,255,255,0.1); 
-            color: #fff; 
-            box-shadow: 0 4px 12px rgba(0,0,0,0.2); 
-        }
-        .mode-btn:hover:not(.active) { color: #fff; background: rgba(255,255,255,0.05); }
+        .tab-btn.active { color: #fff; background: rgba(255,255,255,0.05); box-shadow: inset 0 -2px 0 var(--accent); }
+        .tab-btn:hover:not(.active) { color: #fff; background: rgba(255,255,255,0.02); }
+        
+        .tab-content { display: none; animation: fadeIn 0.4s ease; }
+        .tab-content.active { display: block; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 
         /* Control Bar */
-        .control-bar {
-            display: flex; gap: 16px; align-items: center; flex-wrap: wrap;
-            padding: 20px; margin-bottom: 24px;
-        }
+        .control-bar { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; padding: 20px; margin-bottom: 24px; }
         .upload-box {
             flex: 1; min-width: 220px; border: 2px dashed rgba(148, 163, 184, 0.3); border-radius: 12px;
             padding: 16px; text-align: center; cursor: pointer; transition: all 0.3s ease;
             background: rgba(0,0,0,0.2);
         }
-        .upload-box:hover { 
-            border-color: var(--accent); 
-            background: rgba(139, 92, 246, 0.1); 
-            transform: translateY(-2px);
-        }
+        .upload-box:hover { border-color: var(--accent); background: rgba(139, 92, 246, 0.1); transform: translateY(-2px); }
         .upload-box p { font-size: 0.85rem; color: var(--muted); font-weight: 500; }
         .upload-box .ready { color: var(--teal); font-weight: 700; text-shadow: 0 0 10px rgba(20, 184, 166, 0.4); }
         
@@ -135,120 +103,73 @@
             cursor: pointer; border: none; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
             font-family: inherit; display: flex; align-items: center; justify-content: center; gap: 8px;
         }
-        .btn-primary { 
-            background: linear-gradient(135deg, #8b5cf6, #ec4899); 
-            color: #fff; 
-            box-shadow: 0 4px 15px rgba(236, 72, 153, 0.3);
-        }
-        .btn-primary:hover:not(:disabled) { 
-            transform: translateY(-2px); 
-            box-shadow: 0 8px 25px rgba(236, 72, 153, 0.5); 
-        }
-        .btn-primary:disabled { 
-            background: #334155; color: #64748b; cursor: not-allowed; box-shadow: none; 
-        }
-        
-        .btn-download { 
-            background: rgba(34, 197, 94, 0.1); 
-            border: 1px solid rgba(34, 197, 94, 0.3); 
-            color: #4ade80; 
-        }
-        .btn-download:hover { 
-            background: rgba(34, 197, 94, 0.2); 
-            box-shadow: 0 0 15px rgba(34, 197, 94, 0.2);
-        }
+        .btn-primary { background: linear-gradient(135deg, #8b5cf6, #ec4899); color: #fff; box-shadow: 0 4px 15px rgba(236, 72, 153, 0.3); }
+        .btn-primary:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 8px 25px rgba(236, 72, 153, 0.5); }
+        .btn-primary:disabled { background: #334155; color: #64748b; cursor: not-allowed; box-shadow: none; }
+        .btn-download { background: rgba(34, 197, 94, 0.1); border: 1px solid rgba(34, 197, 94, 0.3); color: #4ade80; }
+        .btn-download:hover { background: rgba(34, 197, 94, 0.2); box-shadow: 0 0 15px rgba(34, 197, 94, 0.2); }
+        .btn-danger { background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); color: #f87171; padding: 6px 12px; }
+        .btn-danger:hover { background: rgba(239, 68, 68, 0.2); box-shadow: 0 0 10px rgba(239, 68, 68, 0.2); }
 
         /* Progress */
         .progress-section { display: flex; align-items: center; gap: 12px; flex: 2; min-width: 260px; }
         .progress-track { flex: 1; height: 6px; background: rgba(0,0,0,0.3); border-radius: 4px; overflow: hidden; }
         .progress-fill { 
-            height: 100%; width: 0%; 
-            background: linear-gradient(90deg, #14b8a6, #3b82f6, #8b5cf6); 
-            background-size: 200% 200%;
-            animation: gradientMove 2s ease infinite;
-            transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1); 
-            border-radius: 4px; 
-            box-shadow: 0 0 10px rgba(139, 92, 246, 0.5);
+            height: 100%; width: 0%; background: linear-gradient(90deg, #14b8a6, #3b82f6, #8b5cf6); 
+            background-size: 200% 200%; animation: gradientMove 2s ease infinite; transition: width 0.4s; 
         }
         @keyframes gradientMove { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
-        .progress-label { font-size: 0.8rem; color: var(--muted); font-weight: 600; white-space: nowrap; }
+
+        /* Schedule Controls */
+        .select-freq { 
+            padding: 12px; border-radius: 10px; background: rgba(0,0,0,0.4); color: #fff;
+            border: 1px solid var(--border); font-family: inherit; font-size: 0.9rem; outline: none;
+        }
 
         /* Stats */
         .stats-bar { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
-        .stat {
-            padding: 16px 20px; display: flex; align-items: center; gap: 14px;
-            transition: transform 0.3s;
-        }
+        .stat { padding: 16px 20px; display: flex; align-items: center; gap: 14px; transition: transform 0.3s; }
         .stat:hover { transform: translateY(-3px); }
         .stat-dot { width: 12px; height: 12px; border-radius: 50%; box-shadow: 0 0 10px currentColor; }
-        .stat-val { font-size: 1.6rem; font-weight: 800; line-height: 1.1; }
-        .stat-lbl { font-size: 0.75rem; color: var(--muted); font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 4px;}
-        
+        .stat-val { font-size: 1.6rem; font-weight: 800; }
+        .stat-lbl { font-size: 0.75rem; color: var(--muted); font-weight: 500; text-transform: uppercase; margin-top: 4px;}
         .dot-teal { background: var(--teal); color: var(--teal); } .val-teal { color: #5eead4; }
-        .dot-gtm { background: var(--purple); color: var(--purple); } .val-gtm { color: #d8b4fe; }
-        .dot-ga4 { background: var(--pink); color: var(--pink); } .val-ga4 { color: #fbcfe8; }
         .dot-adobe { background: var(--orange); color: var(--orange); } .val-adobe { color: #fdba74; }
 
-        /* Table */
-        .table-card { overflow: hidden; }
-        .table-bar {
-            display: flex; justify-content: space-between; align-items: center;
-            padding: 16px 20px; border-bottom: 1px solid var(--border); 
-            background: rgba(0,0,0,0.2);
-        }
+        /* Tables */
+        .table-card { overflow: hidden; margin-bottom: 24px; }
+        .table-bar { display: flex; justify-content: space-between; align-items: center; padding: 16px 20px; border-bottom: 1px solid var(--border); background: rgba(0,0,0,0.2); }
         .table-bar h3 { font-size: 0.95rem; font-weight: 600; }
         .table-wrap { overflow-x: auto; max-height: 550px; overflow-y: auto; }
-        
-        /* Custom Scrollbar */
         .table-wrap::-webkit-scrollbar { width: 8px; height: 8px; }
         .table-wrap::-webkit-scrollbar-track { background: rgba(0,0,0,0.1); }
         .table-wrap::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 4px; }
-        .table-wrap::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.3); }
-
+        
         table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 0.8rem; white-space: nowrap; }
         thead { position: sticky; top: 0; z-index: 2; }
         th {
             padding: 12px 14px; font-weight: 600; text-transform: uppercase;
-            letter-spacing: 0.5px; font-size: 0.7rem; color: var(--muted);
-            border-bottom: 1px solid rgba(255,255,255,0.1); text-align: left;
-            background: rgba(15, 23, 42, 0.95);
-            backdrop-filter: blur(4px);
+            font-size: 0.7rem; color: var(--muted); border-bottom: 1px solid rgba(255,255,255,0.1); text-align: left;
+            background: rgba(15, 23, 42, 0.95); backdrop-filter: blur(4px);
         }
-        td { 
-            padding: 10px 14px; 
-            border-bottom: 1px solid rgba(255,255,255,0.05); 
-            background: rgba(255,255,255,0.01);
-            transition: background 0.2s;
-        }
+        td { padding: 10px 14px; border-bottom: 1px solid rgba(255,255,255,0.05); background: rgba(255,255,255,0.01); transition: background 0.2s; }
         tr:hover td { background: rgba(255,255,255,0.05); }
 
-        /* Section headers */
         th.h-teal { color: #5eead4; background: rgba(20, 184, 166, 0.15); }
-        th.h-gtm { color: #d8b4fe; background: rgba(168, 85, 247, 0.15); }
-        th.h-ga4 { color: #fbcfe8; background: rgba(236, 72, 153, 0.15); }
         th.h-adobe { color: #fdba74; background: rgba(249, 115, 22, 0.15); }
 
-        .badge { 
-            padding: 4px 10px; border-radius: 20px; font-size: 0.65rem; font-weight: 700; 
-            letter-spacing: 0.5px; text-transform: uppercase;
-        }
-        .b-pass { background: rgba(34, 197, 94, 0.15); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.3); box-shadow: 0 0 10px rgba(34, 197, 94, 0.1); }
-        .b-fail { background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); box-shadow: 0 0 10px rgba(239, 68, 68, 0.1); }
-        
-        .mono { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace; font-size: 0.75rem; color: #a78bfa; background: rgba(139, 92, 246, 0.1); padding: 2px 6px; border-radius: 4px;}
+        .badge { padding: 4px 10px; border-radius: 20px; font-size: 0.65rem; font-weight: 700; text-transform: uppercase; }
+        .b-pass { background: rgba(34, 197, 94, 0.15); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.3); }
+        .b-fail { background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); }
+        .mono { font-family: monospace; font-size: 0.75rem; color: #a78bfa; background: rgba(139, 92, 246, 0.1); padding: 2px 6px; border-radius: 4px;}
         .url-col { max-width: 280px; overflow: hidden; text-overflow: ellipsis; color: #e2e8f0; font-weight: 500; }
         .empty-msg { text-align: center; padding: 60px; color: var(--muted); font-size: 0.9rem; }
 
         .log-box {
-            background: rgba(0,0,0,0.4); border-radius: 12px; padding: 16px; 
-            font-family: 'SFMono-Regular', Consolas, monospace;
+            background: rgba(0,0,0,0.4); border-radius: 12px; padding: 16px; font-family: monospace;
             font-size: 0.75rem; height: 120px; overflow-y: auto; color: #4ade80;
-            margin-bottom: 24px; border: 1px solid var(--border);
-            box-shadow: inset 0 2px 10px rgba(0,0,0,0.5);
+            margin-bottom: 24px; border: 1px solid var(--border); box-shadow: inset 0 2px 10px rgba(0,0,0,0.5);
         }
-        .log-box div { margin-bottom: 4px; opacity: 0; animation: fadeIn 0.3s forwards; }
-        @keyframes fadeIn { to { opacity: 1; } }
-        
         .hidden { display: none !important; }
     </style>
 </head>
@@ -262,59 +183,105 @@
             <div class="logo-icon">TV</div>
             <h1>Tag <span>Validator</span> Pro</h1>
         </div>
-        <span style="font-size:0.8rem; color:var(--muted); font-weight:500; background: rgba(255,255,255,0.1); padding: 4px 12px; border-radius: 20px;">v2.0 • Ultra Fast</span>
+        <span style="font-size:0.8rem; color:var(--muted); font-weight:500; background: rgba(255,255,255,0.1); padding: 4px 12px; border-radius: 20px;">v3.0 • Automated Edition</span>
     </nav>
 
     <div class="main">
-        <!-- Mode Toggle -->
-        <div class="mode-toggle">
-            <button class="mode-btn active" data-mode="tealium" onclick="setMode('tealium')">Tealium + Adobe</button>
-            <button class="mode-btn" data-mode="ga4" onclick="setMode('ga4')">GA4 + GTM</button>
+        <div class="tabs">
+            <button class="tab-btn active" onclick="switchTab('manual')">Live Validation</button>
+            <button class="tab-btn" onclick="switchTab('scheduler')">Automated Schedules</button>
         </div>
 
-        <!-- Control Bar -->
-        <div class="control-bar glass">
-            <div id="uploadBox" class="upload-box">
-                <p id="uploadText">Drop Excel here or click to browse</p>
-                <input type="file" id="fileInput" class="hidden" accept=".xlsx,.xls">
+        <!-- MANUAL TAB -->
+        <div id="tab-manual" class="tab-content active">
+            <div class="control-bar glass">
+                <div id="uploadBoxManual" class="upload-box">
+                    <p id="uploadTextManual">Drop Excel here or click to browse</p>
+                    <input type="file" id="fileInputManual" class="hidden" accept=".xlsx,.xls">
+                </div>
+                <button id="runBtn" class="btn btn-primary" disabled>Run Validation</button>
+                <div id="progressSection" class="progress-section hidden">
+                    <span id="progressLabel" style="font-size:0.8rem; color:var(--muted)">0/0</span>
+                    <div class="progress-track"><div id="progressBar" class="progress-fill"></div></div>
+                </div>
+                <button id="downloadBtn" class="btn btn-download hidden">Download Report</button>
             </div>
-            <button id="runBtn" class="btn btn-primary" disabled>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
-                Run Validation
-            </button>
-            <div id="progressSection" class="progress-section hidden">
-                <span id="progressLabel" class="progress-label">0/0</span>
-                <div class="progress-track"><div id="progressBar" class="progress-fill"></div></div>
-                <span id="percentLabel" class="progress-label">0%</span>
+            <div id="logBox" class="log-box hidden">System Ready... Waiting for input.</div>
+            <div id="statsBar" class="stats-bar hidden"></div>
+            <div class="table-card glass">
+                <div class="table-bar">
+                    <h3 id="tableTitle">Real-time Analysis Results</h3>
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <thead id="tableHead">
+                            <tr>
+                                <th rowspan="2">#</th><th rowspan="2">URL</th>
+                                <th colspan="4" class="h-teal" style="text-align:center;">TEALIUM</th>
+                                <th colspan="3" class="h-adobe" style="text-align:center;">ADOBE ANALYTICS</th>
+                            </tr>
+                            <tr>
+                                <th class="h-teal">Loaded</th><th class="h-teal">Account</th><th class="h-teal">Profile</th><th class="h-teal">Env</th>
+                                <th class="h-adobe">Loaded</th><th class="h-adobe">Report Suite</th><th class="h-adobe">Page View</th>
+                            </tr>
+                        </thead>
+                        <tbody id="resultsBody">
+                            <tr><td colspan="9" class="empty-msg">Upload a file and run validation</td></tr>
+                        </tbody>
+                    </table>
+                </div>
             </div>
-            <button id="downloadBtn" class="btn btn-download hidden">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-                Download Report
-            </button>
         </div>
 
-        <div id="logBox" class="log-box hidden">System Ready... Waiting for input.</div>
-
-        <!-- Stats -->
-        <div id="statsBar" class="stats-bar hidden"></div>
-
-        <!-- Table -->
-        <div class="table-card glass">
-            <div class="table-bar">
-                <h3 id="tableTitle">Real-time Analysis Results</h3>
-                <span id="totalCount" style="font-size:0.75rem; color:var(--muted); font-weight: 500; background: rgba(0,0,0,0.2); padding: 4px 10px; border-radius: 12px;"></span>
+        <!-- SCHEDULER TAB -->
+        <div id="tab-scheduler" class="tab-content">
+            <div class="control-bar glass">
+                <div id="uploadBoxSchedule" class="upload-box">
+                    <p id="uploadTextSchedule">Select Excel File for Automation</p>
+                    <input type="file" id="fileInputSchedule" class="hidden" accept=".xlsx,.xls">
+                </div>
+                <select id="scheduleFreq" class="select-freq">
+                    <option value="daily">Daily (Midnight)</option>
+                    <option value="weekly">Weekly (Sunday)</option>
+                    <option value="monthly">Monthly (1st)</option>
+                    <option value="every_minute">Every Minute (Testing)</option>
+                </select>
+                <button id="scheduleBtn" class="btn btn-primary" disabled>Create Schedule</button>
             </div>
-            <div class="table-wrap">
-                <table>
-                    <thead id="tableHead"></thead>
-                    <tbody id="resultsBody">
-                        <tr><td colspan="10" class="empty-msg">Upload a file and run validation to see magic happen ✨</td></tr>
-                    </tbody>
-                </table>
+
+            <div class="table-card glass">
+                <div class="table-bar"><h3>Active Scheduled Audits</h3></div>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Schedule ID</th><th>File Name</th><th>Frequency</th><th>Created At</th><th>Last Run</th><th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="schedulesBody">
+                            <tr><td colspan="6" class="empty-msg">No active schedules</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="table-card glass">
+                <div class="table-bar"><h3>Audit History (Auto Runs)</h3></div>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>File Name</th><th>Run Date</th><th>Size</th><th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="historyBody">
+                            <tr><td colspan="4" class="empty-msg">No automated runs yet</td></tr>
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
     </div>
-
     <script src="app.js"></script>
 </body>
 </html>

@@ -1,32 +1,39 @@
 let currentMode = 'tealium';
 let cachedResults = [];
+let scheduleFile = null;
 
-function setMode(mode) {
-    currentMode = mode;
-    document.querySelectorAll('.mode-btn').forEach(b => {
-        b.classList.toggle('active', b.dataset.mode === mode);
-    });
-    renderTable();
+function switchTab(tabId) {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelector(`[onclick="switchTab('${tabId}')"]`).classList.add('active');
+    
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+    document.getElementById(`tab-${tabId}`).classList.add('active');
+
+    if (tabId === 'scheduler') {
+        loadSchedules();
+        loadHistory();
+    }
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-    const uploadBox = document.getElementById('uploadBox');
-    const fileInput = document.getElementById('fileInput');
-    const uploadText = document.getElementById('uploadText');
+    // --- MANUAL TAB LOGIC ---
+    const uploadBoxM = document.getElementById('uploadBoxManual');
+    const fileInputM = document.getElementById('fileInputManual');
+    const uploadTextM = document.getElementById('uploadTextManual');
     const runBtn = document.getElementById('runBtn');
     const logBox = document.getElementById('logBox');
     const downloadBtn = document.getElementById('downloadBtn');
 
-    uploadBox.onclick = () => fileInput.click();
-    fileInput.onchange = async (e) => {
+    uploadBoxM.onclick = () => fileInputM.click();
+    fileInputM.onchange = async (e) => {
         if (!e.target.files.length) return;
         const f = e.target.files[0];
-        uploadText.innerText = 'Uploading...';
+        uploadTextM.innerText = 'Uploading...';
         const fd = new FormData();
         fd.append('file', f);
         const r = await fetch('/api/tag-validator/upload', { method: 'POST', body: fd });
         if (r.ok) {
-            uploadText.innerHTML = '<span class="ready">' + f.name + '</span>';
+            uploadTextM.innerHTML = '<span class="ready">' + f.name + '</span>';
             runBtn.disabled = false;
         }
     };
@@ -52,7 +59,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (m) {
                     const c = +m[1], t = +m[2], pct = Math.round(c / t * 100);
                     document.getElementById('progressLabel').innerText = c + '/' + t;
-                    document.getElementById('percentLabel').innerText = pct + '%';
                     document.getElementById('progressBar').style.width = pct + '%';
                 }
             }
@@ -67,15 +73,47 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     downloadBtn.onclick = () => window.location.href = '/api/tag-validator/download';
-
-    // Initial render
     renderTable();
+
+    // --- SCHEDULER TAB LOGIC ---
+    const uploadBoxS = document.getElementById('uploadBoxSchedule');
+    const fileInputS = document.getElementById('fileInputSchedule');
+    const uploadTextS = document.getElementById('uploadTextSchedule');
+    const scheduleBtn = document.getElementById('scheduleBtn');
+    const scheduleFreq = document.getElementById('scheduleFreq');
+
+    uploadBoxS.onclick = () => fileInputS.click();
+    fileInputS.onchange = (e) => {
+        if (!e.target.files.length) return;
+        scheduleFile = e.target.files[0];
+        uploadTextS.innerHTML = '<span class="ready">' + scheduleFile.name + '</span>';
+        scheduleBtn.disabled = false;
+    };
+
+    scheduleBtn.onclick = async () => {
+        if (!scheduleFile) return;
+        scheduleBtn.disabled = true;
+        scheduleBtn.innerText = 'Creating...';
+        
+        const fd = new FormData();
+        fd.append('file', scheduleFile);
+        fd.append('frequency', scheduleFreq.value);
+        
+        const r = await fetch('/api/schedule/add', { method: 'POST', body: fd });
+        if (r.ok) {
+            scheduleFile = null;
+            uploadTextS.innerText = 'Select Excel File for Automation';
+            scheduleBtn.innerText = 'Create Schedule';
+            loadSchedules();
+        } else {
+            scheduleBtn.disabled = false;
+            scheduleBtn.innerText = 'Create Schedule';
+            alert("Error creating schedule");
+        }
+    };
 });
 
-const B = v => v === 'PASS'
-    ? '<span class="badge b-pass">PASS</span>'
-    : '<span class="badge b-fail">FAIL</span>';
-
+const B = v => v === 'PASS' ? '<span class="badge b-pass">PASS</span>' : '<span class="badge b-fail">FAIL</span>';
 const ID = v => v ? '<span class="mono">' + v + '</span>' : '<span style="color:#d1d5db">--</span>';
 
 async function loadResults() {
@@ -88,88 +126,82 @@ async function loadResults() {
 }
 
 function renderTable() {
-    const head = document.getElementById('tableHead');
     const body = document.getElementById('resultsBody');
     const statsBar = document.getElementById('statsBar');
 
-    if (currentMode === 'tealium') {
-        head.innerHTML = `
-            <tr>
-                <th rowspan="2">#</th>
-                <th rowspan="2">URL</th>
-                <th colspan="4" class="h-teal" style="text-align:center;">TEALIUM</th>
-                <th colspan="3" class="h-adobe" style="text-align:center;">ADOBE ANALYTICS</th>
-            </tr>
-            <tr>
-                <th class="h-teal">Loaded</th><th class="h-teal">Account</th><th class="h-teal">Profile</th><th class="h-teal">Env</th>
-                <th class="h-adobe">Loaded</th><th class="h-adobe">Report Suite</th><th class="h-adobe">Page View</th>
-            </tr>`;
-    } else {
-        head.innerHTML = `
-            <tr>
-                <th rowspan="2">#</th>
-                <th rowspan="2">URL</th>
-                <th colspan="2" class="h-gtm" style="text-align:center;">GTM</th>
-                <th colspan="3" class="h-ga4" style="text-align:center;">GA4</th>
-            </tr>
-            <tr>
-                <th class="h-gtm">Loaded</th><th class="h-gtm">Container ID</th>
-                <th class="h-ga4">Fired</th><th class="h-ga4">Measurement ID</th><th class="h-ga4">Page View</th>
-            </tr>`;
-    }
-
     if (!cachedResults.length) {
-        body.innerHTML = '<tr><td colspan="10" class="empty-msg">Upload a file and run validation</td></tr>';
+        body.innerHTML = '<tr><td colspan="9" class="empty-msg">Upload a file and run validation</td></tr>';
         statsBar.classList.add('hidden');
         return;
     }
 
-    // Stats
-    let st = { teal: 0, gtm: 0, ga4: 0, adobe: 0 };
+    let st = { teal: 0, adobe: 0 };
     cachedResults.forEach(r => {
         if (r.Tealium_Loaded === 'PASS') st.teal++;
-        if (r.GTM_Loaded === 'PASS') st.gtm++;
-        if (r.GA4_Fired === 'PASS') st.ga4++;
         if (r.Adobe_Loaded === 'PASS') st.adobe++;
     });
 
     statsBar.classList.remove('hidden');
-    if (currentMode === 'tealium') {
-        statsBar.innerHTML = `
-            <div class="stat"><div class="stat-dot dot-teal"></div><div><div class="stat-val val-teal">${st.teal}/${cachedResults.length}</div><div class="stat-lbl">Tealium Loaded</div></div></div>
-            <div class="stat"><div class="stat-dot dot-adobe"></div><div><div class="stat-val val-adobe">${st.adobe}/${cachedResults.length}</div><div class="stat-lbl">Adobe Loaded</div></div></div>
-        `;
-    } else {
-        statsBar.innerHTML = `
-            <div class="stat"><div class="stat-dot dot-gtm"></div><div><div class="stat-val val-gtm">${st.gtm}/${cachedResults.length}</div><div class="stat-lbl">GTM Loaded</div></div></div>
-            <div class="stat"><div class="stat-dot dot-ga4"></div><div><div class="stat-val val-ga4">${st.ga4}/${cachedResults.length}</div><div class="stat-lbl">GA4 Fired</div></div></div>
-        `;
-    }
+    statsBar.innerHTML = `
+        <div class="stat"><div class="stat-dot dot-teal"></div><div><div class="stat-val val-teal">${st.teal}/${cachedResults.length}</div><div class="stat-lbl">Tealium Loaded</div></div></div>
+        <div class="stat"><div class="stat-dot dot-adobe"></div><div><div class="stat-val val-adobe">${st.adobe}/${cachedResults.length}</div><div class="stat-lbl">Adobe Loaded</div></div></div>
+    `;
 
-    document.getElementById('totalCount').innerText = cachedResults.length + ' sites';
+    body.innerHTML = cachedResults.map((r, i) => `<tr>
+        <td>${i + 1}</td>
+        <td class="url-col" title="${r.URL}">${r.URL}</td>
+        <td>${B(r.Tealium_Loaded)}</td>
+        <td>${ID(r.Tealium_Account)}</td>
+        <td>${ID(r.Tealium_Profile)}</td>
+        <td>${ID(r.Tealium_Env)}</td>
+        <td>${B(r.Adobe_Loaded)}</td>
+        <td>${ID(r.Adobe_ReportSuite)}</td>
+        <td>${B(r.Adobe_PageView)}</td>
+    </tr>`).join('');
+}
 
-    // Table rows
-    if (currentMode === 'tealium') {
-        body.innerHTML = cachedResults.map((r, i) => `<tr>
-            <td>${i + 1}</td>
-            <td class="url-col" title="${r.URL}">${r.URL}</td>
-            <td>${B(r.Tealium_Loaded)}</td>
-            <td>${ID(r.Tealium_Account)}</td>
-            <td>${ID(r.Tealium_Profile)}</td>
-            <td>${ID(r.Tealium_Env)}</td>
-            <td>${B(r.Adobe_Loaded)}</td>
-            <td>${ID(r.Adobe_ReportSuite)}</td>
-            <td>${B(r.Adobe_PageView)}</td>
-        </tr>`).join('');
-    } else {
-        body.innerHTML = cachedResults.map((r, i) => `<tr>
-            <td>${i + 1}</td>
-            <td class="url-col" title="${r.URL}">${r.URL}</td>
-            <td>${B(r.GTM_Loaded)}</td>
-            <td>${ID(r.GTM_ID)}</td>
-            <td>${B(r.GA4_Fired)}</td>
-            <td>${ID(r.GA4_Measurement_ID)}</td>
-            <td>${B(r.GA4_PageView)}</td>
-        </tr>`).join('');
+async function loadSchedules() {
+    const r = await fetch('/api/schedule/list');
+    const d = await r.json();
+    const tbody = document.getElementById('schedulesBody');
+    if (!d.schedules || !d.schedules.length) {
+        tbody.innerHTML = '<tr><td colspan="6" class="empty-msg">No active schedules</td></tr>';
+        return;
     }
+    
+    tbody.innerHTML = d.schedules.map(s => `
+        <tr>
+            <td class="mono">${s.id.substring(0,8)}</td>
+            <td>${s.filename}</td>
+            <td><span class="badge b-pass" style="background:rgba(139,92,246,0.1);color:#a78bfa;border-color:rgba(139,92,246,0.3);">${s.frequency}</span></td>
+            <td>${new Date(s.createdAt).toLocaleString()}</td>
+            <td>${s.lastRun ? new Date(s.lastRun).toLocaleString() : 'Never'}</td>
+            <td><button class="btn btn-danger" onclick="cancelSchedule('${s.id}')">Cancel</button></td>
+        </tr>
+    `).join('');
+}
+
+async function cancelSchedule(id) {
+    if (!confirm('Are you sure you want to cancel this schedule?')) return;
+    await fetch('/api/schedule/cancel/' + id, { method: 'DELETE' });
+    loadSchedules();
+}
+
+async function loadHistory() {
+    const r = await fetch('/api/schedule/history');
+    const d = await r.json();
+    const tbody = document.getElementById('historyBody');
+    if (!d.history || !d.history.length) {
+        tbody.innerHTML = '<tr><td colspan="4" class="empty-msg">No automated runs yet</td></tr>';
+        return;
+    }
+    
+    tbody.innerHTML = d.history.map(h => `
+        <tr>
+            <td>${h.filename}</td>
+            <td>${new Date(h.date).toLocaleString()}</td>
+            <td>${(h.size / 1024).toFixed(1)} KB</td>
+            <td><button class="btn btn-download" style="padding:6px 12px" onclick="window.location.href='/api/schedule/download/${h.filename}'">Download</button></td>
+        </tr>
+    `).join('');
 }
