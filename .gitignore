@@ -1,0 +1,8 @@
+node_modules/
+uploads/
+__pycache__/
+*.pyc
+.env
+validation_results.xlsx
+input_sites.xlsx
+package-lock.json

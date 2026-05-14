@@ -1,44 +1,44 @@
-FROM node:18-slim
+FROM python:3.10-slim
 
+# Install Node.js 20.x and system deps for Chromium
 RUN apt-get update && apt-get install -y \
-    wget \
-        gnupg \
-            ca-certificates \
-                procps \
-                    libnss3 \
-                        libatk1.0-0 \
-                            libatk-bridge2.0-0 \
-                                libcups2 \
-                                    libdrm2 \
-                                        libxkbcommon0 \
-                                            libxcomposite1 \
-                                                libxdamage1 \
-                                                    libxext6 \
-                                                        libxfixes3 \
-                                                            libxrandr2 \
-                                                                libgbm1 \
-                                                                    libpango-1.0-0 \
-                                                                        libcairo2 \
-                                                                            libasound2 \
-                                                                                python3 \
-                                                                                    python3-pip \
-                                                                                        && rm -rf /var/lib/apt/lists/*
+    curl \
+    gnupg \
+    ca-certificates \
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
-                                                                                        RUN apt-get update && apt-get install -y chromium
+# Playwright browser path
+ENV PLAYWRIGHT_BROWSERS_PATH=/app/ms-playwright
 
-                                                                                        ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
-                                                                                        ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+WORKDIR /app
 
-                                                                                        WORKDIR /app
+# Copy package files first for better caching
+COPY package*.json ./
+RUN npm install
 
-                                                                                        COPY package*.json ./
-                                                                                        RUN npm install
+# Install Python dependencies
+RUN pip install --no-cache-dir pandas openpyxl playwright playwright-stealth
 
-                                                                                        COPY . .
+# Install Playwright Chromium + system deps
+RUN playwright install-deps chromium \
+    && playwright install chromium
 
-                                                                                        RUN pip3 install pandas
+# Copy all app files
+COPY . .
 
-                                                                                        EXPOSE 7860
+# Create uploads directory
+RUN mkdir -p uploads
 
-                                                                                        CMD ["node", "server.js"]
-                                                                                        
+# Hugging Face runs as user 1000
+RUN useradd -m -u 1000 user \
+    && chown -R user:user /app
+
+USER user
+
+ENV PORT=7860
+EXPOSE 7860
+
+CMD ["npm", "start"]

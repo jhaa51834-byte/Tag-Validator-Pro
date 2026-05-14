@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tag Validator Pro</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        :root {
+            --bg: #f8f9fc; --card: #ffffff; --border: #e8ecf1;
+            --text: #1e293b; --muted: #94a3b8; --subtle: #f1f5f9;
+            --accent: #6366f1; --accent-light: #eef2ff;
+            --teal: #0d9488; --teal-bg: #f0fdfa; --teal-border: #99f6e4;
+            --purple: #7c3aed; --purple-bg: #f5f3ff; --purple-border: #c4b5fd;
+            --pink: #db2777; --pink-bg: #fdf2f8; --pink-border: #f9a8d4;
+            --orange: #ea580c; --orange-bg: #fff7ed; --orange-border: #fdba74;
+            --green: #16a34a; --red: #dc2626;
+            --shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+            --shadow-lg: 0 4px 12px rgba(0,0,0,0.08);
+        }
+        body { background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; }
+
+        .navbar {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 14px 28px; background: #fff; border-bottom: 1px solid var(--border);
+            box-shadow: var(--shadow);
+        }
+        .navbar .logo { display: flex; align-items: center; gap: 8px; }
+        .navbar .logo-icon {
+            width: 32px; height: 32px; border-radius: 8px;
+            background: linear-gradient(135deg, #6366f1, #8b5cf6);
+            display: flex; align-items: center; justify-content: center;
+            color: #fff; font-weight: 800; font-size: 0.9rem;
+        }
+        .navbar h1 { font-size: 1rem; font-weight: 700; }
+        .navbar h1 span { color: var(--accent); }
+
+        .main { max-width: 1400px; margin: 0 auto; padding: 24px; }
+
+        /* Mode Toggle */
+        .mode-toggle {
+            display: flex; background: var(--subtle); border-radius: 10px;
+            padding: 4px; gap: 4px; margin-bottom: 20px; width: fit-content;
+        }
+        .mode-btn {
+            padding: 8px 20px; border-radius: 8px; border: none; cursor: pointer;
+            font-size: 0.8rem; font-weight: 600; color: var(--muted);
+            background: transparent; transition: all 0.2s;
+        }
+        .mode-btn.active { background: #fff; color: var(--text); box-shadow: var(--shadow); }
+        .mode-btn:hover:not(.active) { color: var(--text); }
+
+        /* Control Bar */
+        .control-bar {
+            display: flex; gap: 14px; align-items: center; flex-wrap: wrap;
+            padding: 18px 20px; border-radius: 12px; background: #fff;
+            border: 1px solid var(--border); box-shadow: var(--shadow); margin-bottom: 20px;
+        }
+        .upload-box {
+            flex: 1; min-width: 180px; border: 2px dashed #d1d5db; border-radius: 10px;
+            padding: 14px; text-align: center; cursor: pointer; transition: all 0.2s;
+            background: var(--subtle);
+        }
+        .upload-box:hover { border-color: var(--accent); background: var(--accent-light); }
+        .upload-box p { font-size: 0.78rem; color: var(--muted); }
+        .upload-box .ready { color: var(--green); font-weight: 600; }
+        .btn {
+            padding: 9px 20px; border-radius: 8px; font-weight: 600; font-size: 0.78rem;
+            cursor: pointer; border: none; transition: all 0.15s;
+        }
+        .btn-primary { background: var(--accent); color: #fff; }
+        .btn-primary:hover:not(:disabled) { background: #4f46e5; transform: translateY(-1px); box-shadow: 0 4px 12px rgba(99,102,241,0.3); }
+        .btn-primary:disabled { background: #d1d5db; color: #9ca3af; cursor: default; }
+        .btn-download { background: #f0fdf4; border: 1px solid #86efac; color: var(--green); }
+        .btn-download:hover { background: #dcfce7; }
+
+        /* Progress */
+        .progress-section { display: flex; align-items: center; gap: 10px; flex: 2; min-width: 260px; }
+        .progress-track { flex: 1; height: 5px; background: #e2e8f0; border-radius: 3px; overflow: hidden; }
+        .progress-fill { height: 100%; width: 0%; background: linear-gradient(90deg, var(--accent), #a78bfa); transition: width 0.4s; border-radius: 3px; }
+        .progress-label { font-size: 0.7rem; color: var(--muted); white-space: nowrap; }
+
+        /* Stats */
+        .stats-bar { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 20px; }
+        .stat {
+            background: #fff; border: 1px solid var(--border); border-radius: 10px;
+            padding: 14px 16px; display: flex; align-items: center; gap: 10px;
+            box-shadow: var(--shadow);
+        }
+        .stat-dot { width: 10px; height: 10px; border-radius: 50%; }
+        .stat-val { font-size: 1.3rem; font-weight: 700; }
+        .stat-lbl { font-size: 0.68rem; color: var(--muted); }
+        .dot-teal { background: var(--teal); } .val-teal { color: var(--teal); }
+        .dot-gtm { background: var(--purple); } .val-gtm { color: var(--purple); }
+        .dot-ga4 { background: var(--pink); } .val-ga4 { color: var(--pink); }
+        .dot-adobe { background: var(--orange); } .val-adobe { color: var(--orange); }
+
+        /* Table */
+        .table-card {
+            background: #fff; border: 1px solid var(--border);
+            border-radius: 12px; overflow: hidden; box-shadow: var(--shadow);
+        }
+        .table-bar {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 12px 16px; border-bottom: 1px solid var(--border); background: var(--subtle);
+        }
+        .table-bar h3 { font-size: 0.82rem; font-weight: 600; }
+        .table-wrap { overflow-x: auto; max-height: 500px; overflow-y: auto; }
+        table { width: 100%; border-collapse: collapse; font-size: 0.72rem; white-space: nowrap; }
+        thead { position: sticky; top: 0; z-index: 2; background: #fff; }
+        th {
+            padding: 8px 10px; font-weight: 600; text-transform: uppercase;
+            letter-spacing: 0.4px; font-size: 0.62rem; color: var(--muted);
+            border-bottom: 2px solid var(--border); text-align: left;
+        }
+        td { padding: 7px 10px; border-bottom: 1px solid #f1f5f9; }
+        tr:hover td { background: #fafbfe; }
+
+        /* Section headers */
+        th.h-teal { color: var(--teal); background: var(--teal-bg); }
+        th.h-gtm { color: var(--purple); background: var(--purple-bg); }
+        th.h-ga4 { color: var(--pink); background: var(--pink-bg); }
+        th.h-adobe { color: var(--orange); background: var(--orange-bg); }
+
+        .badge { padding: 2px 8px; border-radius: 20px; font-size: 0.6rem; font-weight: 700; }
+        .b-pass { background: #f0fdf4; color: var(--green); border: 1px solid #bbf7d0; }
+        .b-fail { background: #fef2f2; color: var(--red); border: 1px solid #fecaca; }
+        .mono { font-family: monospace; font-size: 0.7rem; color: var(--purple); }
+        .url-col { max-width: 260px; overflow: hidden; text-overflow: ellipsis; color: #475569; }
+        .empty-msg { text-align: center; padding: 50px; color: var(--muted); font-size: 0.82rem; }
+
+        .log-box {
+            background: #1e293b; border-radius: 8px; padding: 10px; font-family: monospace;
+            font-size: 0.7rem; height: 80px; overflow-y: auto; color: #4ade80;
+            margin-bottom: 20px; border: 1px solid #334155;
+        }
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+    <nav class="navbar">
+        <div class="logo">
+            <div class="logo-icon">TV</div>
+            <h1>Tag <span>Validator</span> Pro</h1>
+        </div>
+        <span style="font-size:0.7rem; color:var(--muted);">Bulk Site Validation</span>
+    </nav>
+
+    <div class="main">
+        <!-- Mode Toggle -->
+        <div class="mode-toggle">
+            <button class="mode-btn active" data-mode="tealium" onclick="setMode('tealium')">Tealium + Adobe</button>
+            <button class="mode-btn" data-mode="ga4" onclick="setMode('ga4')">GA4 + GTM</button>
+        </div>
+
+        <!-- Control Bar -->
+        <div class="control-bar">
+            <div id="uploadBox" class="upload-box">
+                <p id="uploadText">Drop Excel here or click to browse</p>
+                <input type="file" id="fileInput" class="hidden" accept=".xlsx,.xls">
+            </div>
+            <button id="runBtn" class="btn btn-primary" disabled>Run Validation</button>
+            <div id="progressSection" class="progress-section hidden">
+                <span id="progressLabel" class="progress-label">0/0</span>
+                <div class="progress-track"><div id="progressBar" class="progress-fill"></div></div>
+                <span id="percentLabel" class="progress-label">0%</span>
+            </div>
+            <button id="downloadBtn" class="btn btn-download hidden">Download Report</button>
+        </div>
+
+        <div id="logBox" class="log-box hidden">Waiting...</div>
+
+        <!-- Stats -->
+        <div id="statsBar" class="stats-bar hidden"></div>
+
+        <!-- Table -->
+        <div class="table-card">
+            <div class="table-bar">
+                <h3 id="tableTitle">Validation Results</h3>
+                <span id="totalCount" style="font-size:0.7rem; color:var(--muted);"></span>
+            </div>
+            <div class="table-wrap">
+                <table>
+                    <thead id="tableHead"></thead>
+                    <tbody id="resultsBody">
+                        <tr><td colspan="10" class="empty-msg">Upload a file and run validation</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
