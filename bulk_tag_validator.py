@@ -94,6 +94,7 @@ def parse_analytics_payload(url, post_data=""):
         "is_ga4": False, "ga4_pv": False, "ga4_link": False, "ga4_mid": "",
         "is_gtm": False, "gtm_id": "",
         "is_tealium_js": False, "tealium_account": "", "tealium_profile": "", "tealium_env": "",
+        "tealium_link": False
     }
 
     # --- ADOBE ANALYTICS ---
@@ -143,6 +144,9 @@ def parse_analytics_payload(url, post_data=""):
             result["tealium_account"] = m.group(1)
             result["tealium_profile"] = m.group(2)
             result["tealium_env"] = m.group(3)
+
+    if "tealiumiq.com" in low and ("/v." in low or "/2.gif" in low or "utag.link" in low):
+        result["tealium_link"] = True
 
     # --- GTM ---
     if "googletagmanager.com/gtm.js" in low:
@@ -197,7 +201,7 @@ async def validate_tags(browser, url, index, total):
     tealium_accounts = []
     adobe_rsids = set()
     flags = {
-        "tealium_js": False, 
+        "tealium_js": False, "tealium_link": False,
         "gtm": False, "ga4": False, "ga4_pv": False, "ga4_link": False,
         "adobe": False, "adobe_pv": False, "adobe_link": False
     }
@@ -245,6 +249,8 @@ async def validate_tags(browser, url, index, total):
                         "profile": parsed["tealium_profile"],
                         "env": parsed["tealium_env"]
                     })
+            if parsed["tealium_link"]:
+                flags["tealium_link"] = True
 
             if parsed["is_gtm"]:
                 flags["gtm"] = True
@@ -290,6 +296,8 @@ async def validate_tags(browser, url, index, total):
                         "profile": parsed["tealium_profile"],
                         "env": parsed["tealium_env"]
                     })
+            if parsed["tealium_link"]:
+                flags["tealium_link"] = True
             if parsed["is_gtm"]:
                 flags["gtm"] = True
                 if parsed["gtm_id"]:
@@ -304,6 +312,9 @@ async def validate_tags(browser, url, index, total):
                 flags["ga4_link"] = True
 
         page.on("request", handle_request)
+        
+        page.on("console", lambda msg: sys.stdout.write(f"[{index}/{total}] {msg.text}\n") if "DEBUG_CLICK_HREF" in msg.text else None)
+
 
         sys.stdout.write(f"[{index}/{total}] Checking: {url}\n")
         sys.stdout.flush()
@@ -341,29 +352,46 @@ async def validate_tags(browser, url, index, total):
 
         # ===== RANDOM LINK CLICK (SITE/EXIT LINK TRACKING) =====
         try:
+            # Pick a link and force it to open in a new tab to avoid navigating the main page
+            # This ensures the trackers fire 'click' events without interrupting the script
             await page.evaluate("""
                 () => {
-                    // Prevent actual navigation to keep CDP active on this page
-                    document.addEventListener('click', e => {
-                        let a = e.target.closest('a');
-                        if(a && a.href && !a.href.startsWith('javascript') && !a.href.startsWith('mailto')) {
-                            e.preventDefault(); 
-                        }
-                    });
-                    
                     let links = Array.from(document.querySelectorAll('a')).filter(a => 
                         a.offsetParent !== null && 
                         a.href && 
-                        a.href.startsWith('http')
+                        a.href.startsWith('http') &&
+                        !a.href.includes(window.location.hostname + '/#')
                     );
                     
                     if(links.length > 0) {
+                        // Pick a random link
                         let randomLink = links[Math.floor(Math.random() * links.length)];
+                        console.log("DEBUG_CLICK_HREF: " + randomLink.href);
+                        
+                        // Ensure it's visible and scroll to it
+                        randomLink.scrollIntoView();
+                        
+                        // Mock human interaction sequence
+                        const rect = randomLink.getBoundingClientRect();
+                        const events = ['mouseenter', 'mousedown', 'mouseup', 'click'];
+                        events.forEach(name => {
+                            const evt = new MouseEvent(name, {
+                                bubbles: true,
+                                cancelable: true,
+                                view: window,
+                                clientX: rect.left + rect.width/2,
+                                clientY: rect.top + rect.height/2
+                            });
+                            randomLink.dispatchEvent(evt);
+                        });
+                        
+                        // If it didn't open or preventDefault was called, force target _blank and click again
+                        randomLink.setAttribute('target', '_blank');
                         randomLink.click();
                     }
                 }
             """)
-            await asyncio.sleep(3) # Wait for click tracking beacons to fire
+            await asyncio.sleep(5) # Increased wait for click beacons
         except:
             pass
 
@@ -519,6 +547,10 @@ async def validate_tags(browser, url, index, total):
 
         # ===== BUILD RESULTS =====
         results["Tealium_Loaded"] = "PASS" if flags["tealium_js"] else "FAIL"
+        # If no utag.js found but utag.link fired, we can still mark it pass
+        if flags["tealium_link"] and results["Tealium_Loaded"] == "FAIL":
+            results["Tealium_Loaded"] = "PASS"
+            
         if tealium_accounts:
             results["Tealium_Account"] = tealium_accounts[0].get("account", "")
             results["Tealium_Profile"] = tealium_accounts[0].get("profile", "")
