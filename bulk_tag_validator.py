@@ -90,8 +90,8 @@ def parse_analytics_payload(url, post_data=""):
 
     low = combined.lower()
     result = {
-        "is_adobe": False, "adobe_pv": False, "adobe_rsid": "",
-        "is_ga4": False, "ga4_pv": False, "ga4_mid": "",
+        "is_adobe": False, "adobe_pv": False, "adobe_link": False, "adobe_rsid": "",
+        "is_ga4": False, "ga4_pv": False, "ga4_link": False, "ga4_mid": "",
         "is_gtm": False, "gtm_id": "",
         "is_tealium_js": False, "tealium_account": "", "tealium_profile": "", "tealium_env": "",
     }
@@ -103,9 +103,11 @@ def parse_analytics_payload(url, post_data=""):
         m = re.search(r'/b/ss/([^/]+)/', url)
         if m:
             result["adobe_rsid"] = m.group(1)
-        # PageView = NO 'pe=' parameter (link tracking has pe=lnk_o or pe=lnk_e)
         if "pe=" not in low:
             result["adobe_pv"] = True
+        else:
+            if any(x in low for x in ["pe=lnk_o", "pe=lnk_e", "pe=lnk_d"]):
+                result["adobe_link"] = True
 
     # Adobe library / domain indicators
     if any(x in low for x in [".omtrdc.net", ".2o7.net", "appmeasurement", "s_code", "satellite-", "launch-"]):
@@ -123,9 +125,13 @@ def parse_analytics_payload(url, post_data=""):
                     xdm = ev.get("xdm", {})
                     if xdm.get("eventType") == "web.webpagedetails.pageViews":
                         result["adobe_pv"] = True
+                    elif xdm.get("eventType") == "web.webinteraction.linkClicks":
+                        result["adobe_link"] = True
                     web = xdm.get("web", {})
                     if web.get("webPageDetails", {}).get("pageViews", {}).get("value"):
                         result["adobe_pv"] = True
+                    if web.get("webInteraction", {}).get("linkClicks", {}).get("value"):
+                        result["adobe_link"] = True
             except:
                 pass
 
@@ -159,14 +165,17 @@ def parse_analytics_payload(url, post_data=""):
         m = re.search(r'[?&]tid=(G-[A-Z0-9]+)', combined, re.I)
         if m:
             result["ga4_mid"] = m.group(1).upper()
-        # Check for page_view in URL params OR POST body
         if "en=page_view" in low:
             result["ga4_pv"] = True
+        if any(x in low for x in ["en=click", "en=file_download", "en=outbound"]):
+            result["ga4_link"] = True
 
     # GA4 POST body can have events encoded differently
-    if result["is_ga4"] and post_data and not result["ga4_pv"]:
-        if "page_view" in post_data.lower():
+    if result["is_ga4"] and post_data:
+        if not result["ga4_pv"] and "page_view" in post_data.lower():
             result["ga4_pv"] = True
+        if not result["ga4_link"] and any(x in post_data.lower() for x in ["click", "file_download", "outbound"]):
+            result["ga4_link"] = True
 
     return result
 
@@ -177,8 +186,8 @@ async def validate_tags(browser, url, index, total):
         "Tealium_Loaded": "FAIL", "Tealium_Account": "", "Tealium_Profile": "",
         "Tealium_Env": "",
         "GTM_Loaded": "FAIL", "GTM_ID": "",
-        "GA4_Fired": "FAIL", "GA4_Measurement_ID": "", "GA4_PageView": "FAIL",
-        "Adobe_Loaded": "FAIL", "Adobe_ReportSuite": "", "Adobe_PageView": "FAIL",
+        "GA4_Fired": "FAIL", "GA4_Measurement_ID": "", "GA4_PageView": "FAIL", "GA4_LinkClick": "FAIL",
+        "Adobe_Loaded": "FAIL", "Adobe_ReportSuite": "", "Adobe_PageView": "FAIL", "Adobe_LinkClick": "FAIL",
         "Error": ""
     }
 
@@ -189,8 +198,8 @@ async def validate_tags(browser, url, index, total):
     adobe_rsids = set()
     flags = {
         "tealium_js": False, 
-        "gtm": False, "ga4": False, "ga4_pv": False,
-        "adobe": False, "adobe_pv": False
+        "gtm": False, "ga4": False, "ga4_pv": False, "ga4_link": False,
+        "adobe": False, "adobe_pv": False, "adobe_link": False
     }
 
     # Store all CDP request data for POST body inspection
@@ -223,6 +232,8 @@ async def validate_tags(browser, url, index, total):
                 flags["adobe"] = True
             if parsed["adobe_pv"]:
                 flags["adobe_pv"] = True
+            if parsed["adobe_link"]:
+                flags["adobe_link"] = True
             if parsed["adobe_rsid"]:
                 adobe_rsids.add(parsed["adobe_rsid"])
 
@@ -246,6 +257,8 @@ async def validate_tags(browser, url, index, total):
                     ga4_ids.add(parsed["ga4_mid"])
             if parsed["ga4_pv"]:
                 flags["ga4_pv"] = True
+            if parsed["ga4_link"]:
+                flags["ga4_link"] = True
 
         cdp.on("Network.requestWillBeSent", on_cdp_request)
 
@@ -265,6 +278,8 @@ async def validate_tags(browser, url, index, total):
                 flags["adobe"] = True
             if parsed["adobe_pv"]:
                 flags["adobe_pv"] = True
+            if parsed["adobe_link"]:
+                flags["adobe_link"] = True
             if parsed["adobe_rsid"]:
                 adobe_rsids.add(parsed["adobe_rsid"])
             if parsed["is_tealium_js"]:
@@ -285,6 +300,8 @@ async def validate_tags(browser, url, index, total):
                     ga4_ids.add(parsed["ga4_mid"])
             if parsed["ga4_pv"]:
                 flags["ga4_pv"] = True
+            if parsed["ga4_link"]:
+                flags["ga4_link"] = True
 
         page.on("request", handle_request)
 
@@ -319,6 +336,34 @@ async def validate_tags(browser, url, index, total):
             await asyncio.sleep(1)
             await page.evaluate("window.scrollTo(0, 0)")
             await asyncio.sleep(2)
+        except:
+            pass
+
+        # ===== RANDOM LINK CLICK (SITE/EXIT LINK TRACKING) =====
+        try:
+            await page.evaluate("""
+                () => {
+                    // Prevent actual navigation to keep CDP active on this page
+                    document.addEventListener('click', e => {
+                        let a = e.target.closest('a');
+                        if(a && a.href && !a.href.startsWith('javascript') && !a.href.startsWith('mailto')) {
+                            e.preventDefault(); 
+                        }
+                    });
+                    
+                    let links = Array.from(document.querySelectorAll('a')).filter(a => 
+                        a.offsetParent !== null && 
+                        a.href && 
+                        a.href.startsWith('http')
+                    );
+                    
+                    if(links.length > 0) {
+                        let randomLink = links[Math.floor(Math.random() * links.length)];
+                        randomLink.click();
+                    }
+                }
+            """)
+            await asyncio.sleep(3) # Wait for click tracking beacons to fire
         except:
             pass
 
@@ -484,10 +529,12 @@ async def validate_tags(browser, url, index, total):
         results["GA4_Fired"] = "PASS" if flags["ga4"] else "FAIL"
         results["GA4_Measurement_ID"] = ", ".join(sorted(ga4_ids)) if ga4_ids else ""
         results["GA4_PageView"] = "PASS" if flags["ga4_pv"] else "FAIL"
+        results["GA4_LinkClick"] = "PASS" if flags["ga4_link"] else "FAIL"
 
         results["Adobe_Loaded"] = "PASS" if flags["adobe"] else "FAIL"
         results["Adobe_ReportSuite"] = ", ".join(sorted(adobe_rsids)) if adobe_rsids else ""
         results["Adobe_PageView"] = "PASS" if flags["adobe_pv"] else "FAIL"
+        results["Adobe_LinkClick"] = "PASS" if flags["adobe_link"] else "FAIL"
 
         tags_found = ", ".join([
             k for k, v in {

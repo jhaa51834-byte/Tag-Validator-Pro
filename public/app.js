@@ -130,21 +130,23 @@ function renderTable() {
     const statsBar = document.getElementById('statsBar');
 
     if (!cachedResults.length) {
-        body.innerHTML = '<tr><td colspan="9" class="empty-msg">Upload a file and run validation</td></tr>';
+        body.innerHTML = '<tr><td colspan="13" class="empty-msg">Upload a file and run validation</td></tr>';
         statsBar.classList.add('hidden');
         return;
     }
 
-    let st = { teal: 0, adobe: 0 };
+    let st = { teal: 0, adobe: 0, ga4: 0 };
     cachedResults.forEach(r => {
         if (r.Tealium_Loaded === 'PASS') st.teal++;
         if (r.Adobe_Loaded === 'PASS') st.adobe++;
+        if (r.GA4_Fired === 'PASS') st.ga4++;
     });
 
     statsBar.classList.remove('hidden');
     statsBar.innerHTML = `
         <div class="stat"><div class="stat-dot dot-teal"></div><div><div class="stat-val val-teal">${st.teal}/${cachedResults.length}</div><div class="stat-lbl">Tealium Loaded</div></div></div>
         <div class="stat"><div class="stat-dot dot-adobe"></div><div><div class="stat-val val-adobe">${st.adobe}/${cachedResults.length}</div><div class="stat-lbl">Adobe Loaded</div></div></div>
+        <div class="stat"><div class="stat-dot" style="background:#60a5fa; color:#60a5fa;"></div><div><div class="stat-val" style="color:#93c5fd;">${st.ga4}/${cachedResults.length}</div><div class="stat-lbl">GA4 Loaded</div></div></div>
     `;
 
     body.innerHTML = cachedResults.map((r, i) => `<tr>
@@ -157,6 +159,10 @@ function renderTable() {
         <td>${B(r.Adobe_Loaded)}</td>
         <td>${ID(r.Adobe_ReportSuite)}</td>
         <td>${B(r.Adobe_PageView)}</td>
+        <td>${B(r.Adobe_LinkClick)}</td>
+        <td>${B(r.GA4_Fired)}</td>
+        <td>${B(r.GA4_PageView)}</td>
+        <td>${B(r.GA4_LinkClick)}</td>
     </tr>`).join('');
 }
 
