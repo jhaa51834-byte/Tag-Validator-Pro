@@ -87,6 +87,18 @@
         .tab-content.active { display: block; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 
+        /* Mode Selector */
+        .mode-selector {
+            display: inline-flex; background: rgba(0,0,0,0.3); padding: 4px; border-radius: 12px;
+            border: 1px solid var(--border); margin-bottom: 16px;
+        }
+        .mode-btn {
+            padding: 8px 20px; border-radius: 8px; font-size: 0.85rem; font-weight: 600;
+            cursor: pointer; border: none; background: transparent; color: var(--muted);
+            transition: all 0.3s ease;
+        }
+        .mode-btn.active { background: var(--accent); color: #fff; box-shadow: 0 4px 12px var(--accent-glow); }
+
         /* Control Bar */
         .control-bar { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; padding: 20px; margin-bottom: 24px; }
         .upload-box {
@@ -183,7 +195,7 @@
             <div class="logo-icon">TV</div>
             <h1>Tag <span>Validator</span> Pro</h1>
         </div>
-        <span style="font-size:0.8rem; color:var(--muted); font-weight:500; background: rgba(255,255,255,0.1); padding: 4px 12px; border-radius: 20px;">v3.0 • Automated Edition</span>
+        <span style="font-size:0.8rem; color:var(--muted); font-weight:500; background: rgba(255,255,255,0.1); padding: 4px 12px; border-radius: 20px;">v3.1 • Hybrid Mode</span>
     </nav>
 
     <div class="main">
@@ -194,6 +206,11 @@
 
         <!-- MANUAL TAB -->
         <div id="tab-manual" class="tab-content active">
+            <div class="mode-selector">
+                <button id="modeTealium" class="mode-btn active" onclick="setAuditMode('tealium')">Tealium Audit</button>
+                <button id="modeGA4" class="mode-btn" onclick="setAuditMode('ga4')">GA4/Adobe Audit</button>
+            </div>
+
             <div class="control-bar glass">
                 <div id="uploadBoxManual" class="upload-box">
                     <p id="uploadTextManual">Drop Excel here or click to browse</p>
@@ -204,7 +221,7 @@
                     <span id="progressLabel" style="font-size:0.8rem; color:var(--muted)">0/0</span>
                     <div class="progress-track"><div id="progressBar" class="progress-fill"></div></div>
                 </div>
-                <button id="downloadBtn" class="btn btn-download hidden">Download Report</button>
+                <button id="downloadBtn" class="btn btn-download hidden">Download Mode Report</button>
             </div>
             <div id="logBox" class="log-box hidden">System Ready... Waiting for input.</div>
             <div id="statsBar" class="stats-bar hidden"></div>
@@ -213,24 +230,12 @@
                     <h3 id="tableTitle">Real-time Analysis Results</h3>
                 </div>
                 <div class="table-wrap">
-                    <table>
+                    <table id="resultsTable">
                         <thead id="tableHead">
-                            <tr>
-                                <th rowspan="2">#</th><th rowspan="2">URL</th>
-                                <th colspan="4" class="h-teal" style="text-align:center;">TEALIUM</th>
-                                <th colspan="4" class="h-adobe" style="text-align:center;">ADOBE ANALYTICS</th>
-                                <th colspan="3" class="h-adobe" style="text-align:center; background: rgba(59, 130, 246, 0.15); color: #60a5fa;">GA4</th>
-                            </tr>
-                            <tr>
-                                <th class="h-teal">Loaded</th><th class="h-teal">Account</th><th class="h-teal">Profile</th><th class="h-teal">Env</th>
-                                <th class="h-adobe">Loaded</th><th class="h-adobe">Report Suite</th><th class="h-adobe">Page View</th><th class="h-adobe">Link Click</th>
-                                <th class="h-adobe" style="background: rgba(59, 130, 246, 0.15); color: #60a5fa;">Fired</th>
-                                <th class="h-adobe" style="background: rgba(59, 130, 246, 0.15); color: #60a5fa;">Page View</th>
-                                <th class="h-adobe" style="background: rgba(59, 130, 246, 0.15); color: #60a5fa;">Link Click</th>
-                            </tr>
+                            <!-- Headers injected by app.js -->
                         </thead>
                         <tbody id="resultsBody">
-                            <tr><td colspan="13" class="empty-msg">Upload a file and run validation</td></tr>
+                            <tr><td colspan="6" class="empty-msg">Upload a file and run validation</td></tr>
                         </tbody>
                     </table>
                 </div>

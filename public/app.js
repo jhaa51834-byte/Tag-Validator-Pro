@@ -1,4 +1,4 @@
-let currentMode = 'tealium';
+let currentAuditMode = 'tealium';
 let cachedResults = [];
 let scheduleFile = null;
 
@@ -13,6 +13,13 @@ function switchTab(tabId) {
         loadSchedules();
         loadHistory();
     }
+}
+
+function setAuditMode(mode) {
+    currentAuditMode = mode;
+    document.getElementById('modeTealium').classList.toggle('active', mode === 'tealium');
+    document.getElementById('modeGA4').classList.toggle('active', mode === 'ga4');
+    renderTable(); // Refresh table view with new headers
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -44,7 +51,12 @@ document.addEventListener('DOMContentLoaded', () => {
         logBox.classList.remove('hidden');
         document.getElementById('progressSection').classList.remove('hidden');
 
-        await fetch('/api/tag-validator/run', { method: 'POST' });
+        // Pass mode to the run command
+        await fetch('/api/tag-validator/run', { 
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mode: currentAuditMode })
+        });
 
         const poll = setInterval(async () => {
             const r = await fetch('/api/tag-validator/status');
@@ -126,11 +138,39 @@ async function loadResults() {
 }
 
 function renderTable() {
+    const head = document.getElementById('tableHead');
     const body = document.getElementById('resultsBody');
     const statsBar = document.getElementById('statsBar');
 
+    if (currentAuditMode === 'tealium') {
+        head.innerHTML = `
+            <tr>
+                <th rowspan="2">#</th><th rowspan="2">URL</th>
+                <th colspan="4" class="h-teal" style="text-align:center;">TEALIUM ANALYTICS</th>
+            </tr>
+            <tr>
+                <th class="h-teal">Loaded</th><th class="h-teal">Account</th><th class="h-teal">Profile</th><th class="h-teal">Env</th>
+            </tr>
+        `;
+    } else {
+        head.innerHTML = `
+            <tr>
+                <th rowspan="2">#</th><th rowspan="2">URL</th>
+                <th colspan="2" class="h-adobe" style="text-align:center; background:rgba(255,255,255,0.05)">GTM</th>
+                <th colspan="3" class="h-adobe" style="text-align:center;">ADOBE ANALYTICS</th>
+                <th colspan="2" class="h-adobe" style="text-align:center; background: rgba(59, 130, 246, 0.15); color: #60a5fa;">GA4</th>
+            </tr>
+            <tr>
+                <th style="background:rgba(255,255,255,0.03)">Loaded</th><th style="background:rgba(255,255,255,0.03)">GTM ID</th>
+                <th class="h-adobe">Loaded</th><th class="h-adobe">Report Suite</th><th class="h-adobe">Page View</th>
+                <th class="h-adobe" style="background: rgba(59, 130, 246, 0.15); color: #60a5fa;">Fired</th>
+                <th class="h-adobe" style="background: rgba(59, 130, 246, 0.15); color: #60a5fa;">Page View</th>
+            </tr>
+        `;
+    }
+
     if (!cachedResults.length) {
-        body.innerHTML = '<tr><td colspan="13" class="empty-msg">Upload a file and run validation</td></tr>';
+        body.innerHTML = `<tr><td colspan="${currentAuditMode === 'tealium' ? 6 : 9}" class="empty-msg">Upload a file and run validation</td></tr>`;
         statsBar.classList.add('hidden');
         return;
     }
@@ -143,27 +183,39 @@ function renderTable() {
     });
 
     statsBar.classList.remove('hidden');
-    statsBar.innerHTML = `
-        <div class="stat"><div class="stat-dot dot-teal"></div><div><div class="stat-val val-teal">${st.teal}/${cachedResults.length}</div><div class="stat-lbl">Tealium Loaded</div></div></div>
-        <div class="stat"><div class="stat-dot dot-adobe"></div><div><div class="stat-val val-adobe">${st.adobe}/${cachedResults.length}</div><div class="stat-lbl">Adobe Loaded</div></div></div>
-        <div class="stat"><div class="stat-dot" style="background:#60a5fa; color:#60a5fa;"></div><div><div class="stat-val" style="color:#93c5fd;">${st.ga4}/${cachedResults.length}</div><div class="stat-lbl">GA4 Loaded</div></div></div>
-    `;
+    if (currentAuditMode === 'tealium') {
+        statsBar.innerHTML = `<div class="stat"><div class="stat-dot dot-teal"></div><div><div class="stat-val val-teal">${st.teal}/${cachedResults.length}</div><div class="stat-lbl">Tealium Detected</div></div></div>`;
+    } else {
+        statsBar.innerHTML = `
+            <div class="stat"><div class="stat-dot dot-adobe"></div><div><div class="stat-val val-adobe">${st.adobe}/${cachedResults.length}</div><div class="stat-lbl">Adobe Detected</div></div></div>
+            <div class="stat"><div class="stat-dot" style="background:#60a5fa; color:#60a5fa;"></div><div><div class="stat-val" style="color:#93c5fd;">${st.ga4}/${cachedResults.length}</div><div class="stat-lbl">GA4 Detected</div></div></div>
+        `;
+    }
 
-    body.innerHTML = cachedResults.map((r, i) => `<tr>
-        <td>${i + 1}</td>
-        <td class="url-col" title="${r.URL}">${r.URL}</td>
-        <td>${B(r.Tealium_Loaded)}</td>
-        <td>${ID(r.Tealium_Account)}</td>
-        <td>${ID(r.Tealium_Profile)}</td>
-        <td>${ID(r.Tealium_Env)}</td>
-        <td>${B(r.Adobe_Loaded)}</td>
-        <td>${ID(r.Adobe_ReportSuite)}</td>
-        <td>${B(r.Adobe_PageView)}</td>
-        <td>${B(r.Adobe_LinkClick)}</td>
-        <td>${B(r.GA4_Fired)}</td>
-        <td>${B(r.GA4_PageView)}</td>
-        <td>${B(r.GA4_LinkClick)}</td>
-    </tr>`).join('');
+    body.innerHTML = cachedResults.map((r, i) => {
+        if (currentAuditMode === 'tealium') {
+            return `<tr>
+                <td>${i + 1}</td>
+                <td class="url-col" title="${r.URL}">${r.URL}</td>
+                <td>${B(r.Tealium_Loaded)}</td>
+                <td>${ID(r.Tealium_Account)}</td>
+                <td>${ID(r.Tealium_Profile)}</td>
+                <td>${ID(r.Tealium_Env)}</td>
+            </tr>`;
+        } else {
+            return `<tr>
+                <td>${i + 1}</td>
+                <td class="url-col" title="${r.URL}">${r.URL}</td>
+                <td>${B(r.GTM_Loaded)}</td>
+                <td>${ID(r.GTM_ID)}</td>
+                <td>${B(r.Adobe_Loaded)}</td>
+                <td>${ID(r.Adobe_ReportSuite)}</td>
+                <td>${B(r.Adobe_PageView)}</td>
+                <td>${B(r.GA4_Fired)}</td>
+                <td>${B(r.GA4_PageView)}</td>
+            </tr>`;
+        }
+    }).join('');
 }
 
 async function loadSchedules() {
