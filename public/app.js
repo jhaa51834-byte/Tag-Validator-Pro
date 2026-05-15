@@ -147,9 +147,11 @@ function renderTable() {
             <tr>
                 <th rowspan="2">#</th><th rowspan="2">URL</th>
                 <th colspan="4" class="h-teal" style="text-align:center;">TEALIUM ANALYTICS</th>
+                <th colspan="3" class="h-adobe" style="text-align:center;">ADOBE ANALYTICS</th>
             </tr>
             <tr>
                 <th class="h-teal">Loaded</th><th class="h-teal">Account</th><th class="h-teal">Profile</th><th class="h-teal">Env</th>
+                <th class="h-adobe">Loaded</th><th class="h-adobe">Report Suite</th><th class="h-adobe">Page View</th>
             </tr>
         `;
     } else {
@@ -157,13 +159,12 @@ function renderTable() {
             <tr>
                 <th rowspan="2">#</th><th rowspan="2">URL</th>
                 <th colspan="2" class="h-adobe" style="text-align:center; background:rgba(255,255,255,0.05)">GTM</th>
-                <th colspan="3" class="h-adobe" style="text-align:center;">ADOBE ANALYTICS</th>
-                <th colspan="2" class="h-adobe" style="text-align:center; background: rgba(59, 130, 246, 0.15); color: #60a5fa;">GA4</th>
+                <th colspan="3" class="h-adobe" style="text-align:center; background: rgba(59, 130, 246, 0.15); color: #60a5fa;">GA4</th>
             </tr>
             <tr>
                 <th style="background:rgba(255,255,255,0.03)">Loaded</th><th style="background:rgba(255,255,255,0.03)">GTM ID</th>
-                <th class="h-adobe">Loaded</th><th class="h-adobe">Report Suite</th><th class="h-adobe">Page View</th>
                 <th class="h-adobe" style="background: rgba(59, 130, 246, 0.15); color: #60a5fa;">Fired</th>
+                <th class="h-adobe" style="background: rgba(59, 130, 246, 0.15); color: #60a5fa;">Measurement ID</th>
                 <th class="h-adobe" style="background: rgba(59, 130, 246, 0.15); color: #60a5fa;">Page View</th>
             </tr>
         `;
@@ -201,6 +202,9 @@ function renderTable() {
                 <td>${ID(r.Tealium_Account)}</td>
                 <td>${ID(r.Tealium_Profile)}</td>
                 <td>${ID(r.Tealium_Env)}</td>
+                <td>${B(r.Adobe_Loaded)}</td>
+                <td>${ID(r.Adobe_ReportSuite)}</td>
+                <td>${B(r.Adobe_PageView)}</td>
             </tr>`;
         } else {
             return `<tr>
@@ -208,10 +212,8 @@ function renderTable() {
                 <td class="url-col" title="${r.URL}">${r.URL}</td>
                 <td>${B(r.GTM_Loaded)}</td>
                 <td>${ID(r.GTM_ID)}</td>
-                <td>${B(r.Adobe_Loaded)}</td>
-                <td>${ID(r.Adobe_ReportSuite)}</td>
-                <td>${B(r.Adobe_PageView)}</td>
                 <td>${B(r.GA4_Fired)}</td>
+                <td>${ID(r.GA4_Measurement_ID)}</td>
                 <td>${B(r.GA4_PageView)}</td>
             </tr>`;
         }

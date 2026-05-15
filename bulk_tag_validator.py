@@ -359,10 +359,10 @@ async def main():
     
     # FILTER COLUMNS BASED ON MODE
     if args.mode == 'tealium':
-        cols = ['URL', 'Tealium_Loaded', 'Tealium_Account', 'Tealium_Profile', 'Tealium_Env', 'Error']
+        cols = ['URL', 'Tealium_Loaded', 'Tealium_Account', 'Tealium_Profile', 'Tealium_Env', 'Adobe_Loaded', 'Adobe_ReportSuite', 'Adobe_PageView', 'Error']
         res_df = res_df[[c for c in cols if c in res_df.columns]]
     elif args.mode == 'ga4':
-        cols = ['URL', 'GTM_Loaded', 'GTM_ID', 'GA4_Fired', 'GA4_Measurement_ID', 'GA4_PageView', 'Adobe_Loaded', 'Adobe_ReportSuite', 'Adobe_PageView', 'Error']
+        cols = ['URL', 'GTM_Loaded', 'GTM_ID', 'GA4_Fired', 'GA4_Measurement_ID', 'GA4_PageView', 'Error']
         res_df = res_df[[c for c in cols if c in res_df.columns]]
 
     res_df.to_excel(output_file, index=False)
