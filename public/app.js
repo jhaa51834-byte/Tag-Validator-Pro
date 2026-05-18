@@ -19,6 +19,7 @@ function setAuditMode(mode) {
     currentAuditMode = mode;
     document.getElementById('modeTealium').classList.toggle('active', mode === 'tealium');
     document.getElementById('modeGA4').classList.toggle('active', mode === 'ga4');
+    document.getElementById('modePixels').classList.toggle('active', mode === 'pixels');
     renderTable(); // Refresh table view with new headers
 }
 
@@ -142,7 +143,20 @@ function renderTable() {
     const body = document.getElementById('resultsBody');
     const statsBar = document.getElementById('statsBar');
 
-    if (currentAuditMode === 'tealium') {
+    if (currentAuditMode === 'pixels') {
+        head.innerHTML = `
+            <tr>
+                <th rowspan="2">#</th><th rowspan="2">URL</th>
+                <th colspan="2" class="h-teal" style="text-align:center;">ACCEPT ALL</th>
+                <th colspan="2" class="h-adobe" style="text-align:center;">REJECT ALL</th>
+                <th rowspan="2" style="text-align:center;">Compliance</th>
+            </tr>
+            <tr>
+                <th class="h-teal">#</th><th class="h-teal">Marketing Pixels Fired</th>
+                <th class="h-adobe">#</th><th class="h-adobe">Pixels Fired After Reject</th>
+            </tr>
+        `;
+    } else if (currentAuditMode === 'tealium') {
         head.innerHTML = `
             <tr>
                 <th rowspan="2">#</th><th rowspan="2">URL</th>
@@ -171,20 +185,28 @@ function renderTable() {
     }
 
     if (!cachedResults.length) {
-        body.innerHTML = `<tr><td colspan="${currentAuditMode === 'tealium' ? 6 : 9}" class="empty-msg">Upload a file and run validation</td></tr>`;
+        const ec = currentAuditMode === 'pixels' ? 7 : (currentAuditMode === 'tealium' ? 6 : 9);
+        body.innerHTML = `<tr><td colspan="${ec}" class="empty-msg">Upload a file and run validation</td></tr>`;
         statsBar.classList.add('hidden');
         return;
     }
 
-    let st = { teal: 0, adobe: 0, ga4: 0 };
+    let st = { teal: 0, adobe: 0, ga4: 0, compliant: 0, violations: 0 };
     cachedResults.forEach(r => {
         if (r.Tealium_Loaded === 'PASS') st.teal++;
         if (r.Adobe_Loaded === 'PASS') st.adobe++;
         if (r.GA4_Fired === 'PASS') st.ga4++;
+        if (r.Compliance === 'PASS') st.compliant++;
+        if (r.Compliance === 'FAIL') st.violations++;
     });
 
     statsBar.classList.remove('hidden');
-    if (currentAuditMode === 'tealium') {
+    if (currentAuditMode === 'pixels') {
+        statsBar.innerHTML = `
+            <div class="stat"><div class="stat-dot dot-teal"></div><div><div class="stat-val val-teal">${st.compliant}/${cachedResults.length}</div><div class="stat-lbl">Compliant (no pixels on reject)</div></div></div>
+            <div class="stat"><div class="stat-dot" style="background:#ef4444;color:#ef4444;"></div><div><div class="stat-val" style="color:#f87171;">${st.violations}/${cachedResults.length}</div><div class="stat-lbl">Violations (pixels fired on reject)</div></div></div>
+        `;
+    } else if (currentAuditMode === 'tealium') {
         statsBar.innerHTML = `<div class="stat"><div class="stat-dot dot-teal"></div><div><div class="stat-val val-teal">${st.teal}/${cachedResults.length}</div><div class="stat-lbl">Tealium Detected</div></div></div>`;
     } else {
         statsBar.innerHTML = `
@@ -193,8 +215,22 @@ function renderTable() {
         `;
     }
 
+    const PIX = v => (!v || v === 'None')
+        ? '<span style="color:#64748b">None</span>'
+        : '<span class="mono" style="white-space:normal">' + v + '</span>';
+
     body.innerHTML = cachedResults.map((r, i) => {
-        if (currentAuditMode === 'tealium') {
+        if (currentAuditMode === 'pixels') {
+            return `<tr>
+                <td>${i + 1}</td>
+                <td class="url-col" title="${r.URL}">${r.URL}</td>
+                <td>${ID(r.Accept_All_Count)}</td>
+                <td>${PIX(r.Accept_All_Pixels)}</td>
+                <td>${ID(r.Reject_All_Count)}</td>
+                <td>${PIX(r.Reject_All_Pixels)}</td>
+                <td style="text-align:center">${B(r.Compliance)}</td>
+            </tr>`;
+        } else if (currentAuditMode === 'tealium') {
             return `<tr>
                 <td>${i + 1}</td>
                 <td class="url-col" title="${r.URL}">${r.URL}</td>

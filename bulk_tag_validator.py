@@ -42,6 +42,61 @@ COOKIE_TEXT_PATTERNS = [
     "Consent", "Continue",
 ]
 
+REJECT_SELECTORS = [
+    '#onetrust-reject-all-handler',
+    '#CybotCookiebotDialogBodyButtonDecline',
+    '#CybotCookiebotDialogBodyLevelButtonLevelOptinDeclineAll',
+    'button[title="Reject All"]',
+    'button[title="Reject"]',
+    '#truste-consent-required',
+    '.cc-deny', '.cc-btn.cc-deny',
+    '#cookie-reject', '#reject-cookies',
+    '[data-action="reject"]',
+    'button[aria-label="Reject all cookies"]',
+    'button[aria-label="Reject cookies"]',
+    'button[aria-label="Deny"]',
+]
+
+REJECT_TEXT_PATTERNS = [
+    "Reject All", "Reject all", "REJECT ALL",
+    "Reject Cookies", "Reject cookies", "Reject",
+    "Decline All", "Decline all", "Decline",
+    "Deny All", "Deny all", "Deny",
+    "Necessary only", "Only necessary", "Use necessary cookies only",
+    "Essential only", "Continue without accepting",
+]
+
+# Marketing / advertising pixels keyed by domain fragments found in network requests
+MARKETING_PIXELS = {
+    "Meta / Facebook Pixel": ["facebook.com/tr", "connect.facebook.net", "facebook.com/signals"],
+    "Google Ads": ["googleads.g.doubleclick.net", "googleadservices.com", "/pagead/", "google.com/ads", "google.com/pagead"],
+    "Floodlight (DV360)": ["fls.doubleclick.net", "ad.doubleclick.net"],
+    "LinkedIn Insight": ["px.ads.linkedin.com", "snap.licdn.com"],
+    "TikTok Pixel": ["analytics.tiktok.com", "tiktok.com/i18n/pixel", "tiktok.com/api/v2/pixel"],
+    "X / Twitter Pixel": ["static.ads-twitter.com", "analytics.twitter.com", "t.co/i/adsct"],
+    "Pinterest Tag": ["ct.pinterest.com", "s.pinimg.com/ct"],
+    "Snapchat Pixel": ["tr.snapchat.com", "sc-static.net/scevent"],
+    "Microsoft / Bing UET": ["bat.bing.com"],
+    "Criteo": ["criteo.com", "criteo.net"],
+    "Reddit Pixel": ["pixel.reddit.com", "alb.reddit.com", "redditstatic.com/ads"],
+    "Quora Pixel": ["q.quora.com"],
+    "Taboola": ["taboola.com"],
+    "Outbrain": ["outbrain.com"],
+    "Amazon Ads": ["amazon-adsystem.com"],
+    "Yahoo / Verizon": ["analytics.yahoo.com", "sp.analytics.yahoo.com"],
+}
+
+
+def detect_marketing_pixels(url):
+    """Return the set of marketing pixel names matched by a request URL."""
+    low = (url or "").lower()
+    found = set()
+    for name, fragments in MARKETING_PIXELS.items():
+        if any(f in low for f in fragments):
+            found.add(name)
+    return found
+
+
 async def accept_cookies(page):
     for sel in COOKIE_SELECTORS:
         try:
@@ -51,6 +106,24 @@ async def accept_cookies(page):
                 return True
         except: pass
     for text in COOKIE_TEXT_PATTERNS:
+        try:
+            btn = page.get_by_role("button", name=text, exact=False).first
+            if await btn.is_visible(timeout=200):
+                await btn.click(timeout=2000)
+                return True
+        except: pass
+    return False
+
+
+async def reject_cookies(page):
+    for sel in REJECT_SELECTORS:
+        try:
+            el = page.locator(sel).first
+            if await el.is_visible(timeout=200):
+                await el.click(timeout=2000)
+                return True
+        except: pass
+    for text in REJECT_TEXT_PATTERNS:
         try:
             btn = page.get_by_role("button", name=text, exact=False).first
             if await btn.is_visible(timeout=200):
@@ -270,8 +343,94 @@ async def validate_tags(browser, url, index, total):
         if context: await context.close()
     return results
 
-async def run_batch(browser, urls_batch, start_index, total):
-    tasks = [validate_tags(browser, url, start_index + i, total) for i, url in enumerate(urls_batch)]
+async def _capture_pixels_for_scenario(browser, url, consent_action):
+    """Load the URL in a fresh context, perform a consent action, and return
+    the set of marketing pixels that fired. consent_action: 'accept' | 'reject'."""
+    pixels = set()
+    context = None
+    try:
+        context = await browser.new_context(
+            viewport={'width': 1280, 'height': 800},
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+        )
+        page = await context.new_page()
+        await stealth_obj.apply_stealth_async(page)
+
+        def handle_request(request):
+            for p in detect_marketing_pixels(request.url):
+                pixels.add(p)
+        page.on("request", handle_request)
+
+        try:
+            await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+        except Exception:
+            pass
+
+        await asyncio.sleep(2)
+        if consent_action == "accept":
+            await accept_cookies(page)
+        else:
+            await reject_cookies(page)
+
+        try:
+            await page.wait_for_load_state("networkidle", timeout=12000)
+        except: pass
+        await asyncio.sleep(8)
+
+        # Performance API fallback (catches pixels missed by the request listener)
+        try:
+            perf_urls = await page.evaluate("performance.getEntriesByType('resource').map(r => r.name)")
+            for u in (perf_urls or []):
+                for p in detect_marketing_pixels(u):
+                    pixels.add(p)
+        except: pass
+
+        await page.close()
+    except Exception:
+        pass
+    finally:
+        if context:
+            try: await context.close()
+            except: pass
+    return pixels
+
+
+async def validate_pixels(browser, url, index, total):
+    results = {
+        "URL": url,
+        "Accept_All_Pixels": "", "Accept_All_Count": 0,
+        "Reject_All_Pixels": "", "Reject_All_Count": 0,
+        "Compliance": "PASS", "Error": ""
+    }
+    try:
+        sys.stdout.write(f"[{index}/{total}] Checking pixels: {url}\n")
+        sys.stdout.flush()
+
+        accept_pixels = await _capture_pixels_for_scenario(browser, url, "accept")
+        reject_pixels = await _capture_pixels_for_scenario(browser, url, "reject")
+
+        results["Accept_All_Pixels"] = ", ".join(sorted(accept_pixels)) if accept_pixels else "None"
+        results["Accept_All_Count"] = len(accept_pixels)
+        results["Reject_All_Pixels"] = ", ".join(sorted(reject_pixels)) if reject_pixels else "None"
+        results["Reject_All_Count"] = len(reject_pixels)
+        # Compliance fails if any marketing pixel fires AFTER the user rejected consent
+        results["Compliance"] = "FAIL" if reject_pixels else "PASS"
+
+        sys.stdout.write(
+            f"[{index}/{total}] Done: {url} | Accept:{len(accept_pixels)} "
+            f"Reject:{len(reject_pixels)} | {results['Compliance']}\n"
+        )
+        sys.stdout.flush()
+    except Exception as e:
+        results["Error"] = f"Fatal: {str(e)[:80]}"
+        sys.stdout.write(f"[{index}/{total}] [ERROR] {url}\n")
+        sys.stdout.flush()
+    return results
+
+
+async def run_batch(browser, urls_batch, start_index, total, mode=None):
+    fn = validate_pixels if mode == 'pixels' else validate_tags
+    tasks = [fn(browser, url, start_index + i, total) for i, url in enumerate(urls_batch)]
     return await asyncio.gather(*tasks)
 
 async def main():
@@ -291,7 +450,7 @@ async def main():
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True, args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'])
         for i in range(0, total, CONCURRENCY):
-            all_results.extend(await run_batch(browser, urls[i:i + CONCURRENCY], i + 1, total))
+            all_results.extend(await run_batch(browser, urls[i:i + CONCURRENCY], i + 1, total, args.mode))
         await browser.close()
 
     res_df = pd.DataFrame(all_results)
@@ -299,6 +458,8 @@ async def main():
         cols = ['URL', 'Tealium_Loaded', 'Tealium_Account', 'Tealium_Profile', 'Tealium_Env', 'Adobe_Loaded', 'Adobe_ReportSuite', 'Adobe_PageView', 'Error']
     elif args.mode == 'ga4':
         cols = ['URL', 'GTM_Loaded', 'GTM_ID', 'GA4_Fired', 'GA4_Measurement_ID', 'GA4_PageView', 'Error']
+    elif args.mode == 'pixels':
+        cols = ['URL', 'Accept_All_Pixels', 'Accept_All_Count', 'Reject_All_Pixels', 'Reject_All_Count', 'Compliance', 'Error']
     else: cols = res_df.columns
     res_df[[c for c in cols if c in res_df.columns]].to_excel(output_file, index=False)
 
