@@ -9,4 +9,5 @@ validation_results.json
 input_sites.xlsx
 schedule.json
 schedules.json
+mail_config.json
 package-lock.json

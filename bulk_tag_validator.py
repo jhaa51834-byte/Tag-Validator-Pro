@@ -111,21 +111,108 @@ SCENARIO_GROUPS = {
 
 # Initiator-script signatures -> who fired the request
 SOURCE_SIGNATURES = [
-    ("Tealium", ["tiqcdn.com", "tiqcdn.net", "/utag/", "tealium"]),
-    ("Adobe",   ["assets.adobedtm.com", "/satellite-", "launch-", "launch.min",
-                 "appmeasurement", "s_code", "demdex.net", "adobedc.net", "/at.js", "omtrdc"]),
+    ("Tealium", ["tiqcdn.com", "tiqcdn.net", "tags.tiqcdn", "/utag/", "utag.js",
+                 "utag.sync", "tealium"]),
+    ("Adobe",   ["assets.adobedtm.com", "/satellite-", "/launch-", "launch.min.js",
+                 "launch-ensighten", "appmeasurement", "s_code", "demdex.net",
+                 "adobedc.net", "/at.js", "omtrdc", "adobe.com/launch"]),
     ("GTM / gtag", ["googletagmanager.com/gtm", "googletagmanager.com/gtag",
-                    "/gtm.js", "/gtag/js"]),
+                    "/gtm.js", "/gtag/js", "googletagmanager.com/a"]),
 ]
 
 
-def classify_source(initiator_urls, page_host):
-    """Decide who fired a request from its JS initiator stack URLs."""
-    joined = " ".join((u or "").lower() for u in initiator_urls)
+def _match_signature(url):
+    low = (url or "").lower()
     for name, sigs in SOURCE_SIGNATURES:
-        if any(s in joined for s in sigs):
+        if any(s in low for s in sigs):
             return name
+    return None
+
+
+def classify_source(initiator_urls, page_host):
+    """Plain (non-recursive) check of a single initiator frontier."""
+    for u in initiator_urls:
+        m = _match_signature(u)
+        if m:
+            return m
+    return None
+
+
+def resolve_source(seed_urls, init_map, page_host, max_depth=8):
+    """Walk the request-initiator graph upward to find the true source.
+
+    A pixel beacon's *direct* initiator is usually the pixel vendor's own
+    library (e.g. fbevents.js). To know who really deployed it we follow
+    'who loaded that script?' until we hit a tag manager (Tealium / Adobe /
+    GTM) or run out of parents (=> the tag is hardcoded on the site)."""
+    visited = set()
+    frontier = [u for u in (seed_urls or []) if u]
+    depth = 0
+    while frontier and depth < max_depth:
+        # Does anything in the current frontier belong to a tag manager?
+        for u in frontier:
+            m = _match_signature(u)
+            if m:
+                return m
+        # Climb to the scripts that loaded the current frontier scripts
+        nxt = []
+        for u in frontier:
+            if u in visited:
+                continue
+            visited.add(u)
+            for parent in init_map.get(u, []):
+                if parent and parent not in visited:
+                    nxt.append(parent)
+        frontier = nxt
+        depth += 1
     return "Hardcoded"
+
+
+# Pixel-ID extraction: regex applied to the beacon URL (and POST body)
+PIXEL_ID_PATTERNS = {
+    "Meta / Facebook Pixel": [r'facebook\.com/tr/?\?(?:[^&]*&)*id=(\d{6,})',
+                              r'[?&]id=(\d{8,})'],
+    "Google Ads": [r'/(?:viewthroughconversion|conversion|1p-conversion)/(\d{6,})',
+                    r'[?&]tid=(AW-\d+)', r'[?&]label=([\w-]+)'],
+    "Floodlight (DV360)": [r'[;?&]src=(\d+)', r'/activity[i]?;src=(\d+)'],
+    "LinkedIn Insight": [r'[?&]pid=(\d+)', r'/px/li/track\?pid=(\d+)'],
+    "TikTok Pixel": [r'[?&]sdkid=([A-Za-z0-9]+)', r'[?&]pixel_code=([A-Za-z0-9]+)'],
+    "X / Twitter Pixel": [r'[?&]txn_id=([A-Za-z0-9]+)', r'[?&]p_id=([A-Za-z0-9]+)'],
+    "Pinterest Tag": [r'[?&]tid=(\d+)'],
+    "Snapchat Pixel": [r'[?&]pid=([A-Za-z0-9-]+)', r'[?&]id=([A-Za-z0-9-]{6,})'],
+    "Microsoft / Bing UET": [r'[?&]ti=(\d+)'],
+    "Criteo": [r'[?&]a=(\d+)'],
+    "Reddit Pixel": [r'pixel\.reddit\.com/.*?[?&]id=([A-Za-z0-9_]+)', r'/(t2_[a-z0-9]+)/'],
+    "Quora Pixel": [r'q\.quora\.com/_/ad/([0-9a-f]+)/pixel'],
+    "Taboola": [r'/libtrc/(?:unip/)?(\d+)/', r'[?&]tim=.*?(\d{4,})'],
+    "Outbrain": [r'[?&]marketerId=([A-Za-z0-9]+)'],
+    "Amazon Ads": [r'amazon-adsystem\.com/[^?]*[?&](?:cb|pid)=([A-Za-z0-9-]+)'],
+    "Yahoo / Verizon": [r'[?&]a=(\d+)'],
+}
+
+
+SOURCE_PRIORITY = ["Tealium", "Adobe", "GTM / gtag", "Hardcoded"]
+
+
+def pick_source(sources):
+    """Collapse all resolved sources of a pixel into one definitive answer.
+    If ANY fire traces back to a tag manager, that manager deployed the pixel;
+    stray 'Hardcoded'-looking fires (e.g. the vendor library script itself)
+    are noise and ignored."""
+    for s in SOURCE_PRIORITY:
+        if s in sources:
+            return s
+    return "Hardcoded"
+
+
+def extract_pixel_id(name, url, post_data=""):
+    """Best-effort extraction of the advertiser/pixel ID from a beacon."""
+    blob = url + (("&" + post_data) if post_data else "")
+    for pat in PIXEL_ID_PATTERNS.get(name, []):
+        m = re.search(pat, blob, re.I)
+        if m:
+            return m.group(1)
+    return ""
 
 
 def _host_of(url):
@@ -451,7 +538,8 @@ async def _capture_pixels_for_scenario(browser, url, scenario):
                         cur = cur.get("parent")
                         depth += 1
                     cdp_records.append({"url": req_url, "init": urls,
-                                        "type": init.get("type", "")})
+                                        "type": init.get("type", ""),
+                                        "post": req.get("postData", "") or ""})
                 except Exception:
                     pass
 
@@ -476,15 +564,29 @@ async def _capture_pixels_for_scenario(browser, url, scenario):
         except: pass
         await asyncio.sleep(8)
 
+        # Build the request->initiator graph (first load of each script wins)
+        init_map = {}
+        for rec in cdp_records:
+            if rec["url"] not in init_map:
+                init_map[rec["url"]] = rec["init"]
+
         pixels = {}
         for rec in cdp_records:
             for pname in detect_marketing_pixels(rec["url"]):
-                bucket = pixels.setdefault(pname, {"count": 0, "sources": set()})
+                bucket = pixels.setdefault(
+                    pname, {"count": 0, "sources": set(), "ids": set()})
                 bucket["count"] += 1
+
+                pid = extract_pixel_id(pname, rec["url"], rec.get("post", ""))
+                if pid:
+                    bucket["ids"].add(pid)
+
                 if rec.get("type") == "parser":
-                    bucket["sources"].add("Hardcoded")
+                    # Beacon hardcoded directly in the page HTML markup
+                    src = "Hardcoded"
                 else:
-                    bucket["sources"].add(classify_source(rec["init"], page_host))
+                    src = resolve_source(rec["init"], init_map, page_host)
+                bucket["sources"].add(src)
 
         await page.close()
     except Exception:
@@ -507,13 +609,16 @@ async def validate_pixels(browser, url, index, total):
             px = await _capture_pixels_for_scenario(browser, url, sc)
             total_fires = sum(b["count"] for b in px.values())
             summary = "; ".join(
-                f"{n} x{b['count']} [{'/'.join(sorted(b['sources']))}]"
+                f"{n}{(' #' + '/'.join(sorted(b['ids']))) if b['ids'] else ''}"
+                f" x{b['count']} [{pick_source(b['sources'])}]"
                 for n, b in sorted(px.items())
             ) or "None"
             results[f"{sc}_Pixels"] = summary
             results[f"{sc}_Count"] = total_fires
             rich["scenarios"][sc] = [
-                {"name": n, "count": b["count"], "sources": sorted(b["sources"])}
+                {"name": n, "count": b["count"],
+                 "id": "/".join(sorted(b["ids"])),
+                 "source": pick_source(b["sources"])}
                 for n, b in sorted(px.items())
             ]
 

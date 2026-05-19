@@ -82,9 +82,43 @@ app.get('/api/tag-validator/results-rich', (req, res) => {
 });
 
 // --- Email alerts ---
-function mailerReady() {
-    return !!(process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD);
+const MAIL_CONFIG_FILE = path.join(__dirname, 'mail_config.json');
+
+function loadMailCreds() {
+    // In-app config takes precedence; env vars are a fallback.
+    if (fs.existsSync(MAIL_CONFIG_FILE)) {
+        try {
+            const c = JSON.parse(fs.readFileSync(MAIL_CONFIG_FILE, 'utf8'));
+            if (c.user && c.pass) return { user: c.user, pass: c.pass };
+        } catch { /* ignore */ }
+    }
+    if (process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD)
+        return { user: process.env.GMAIL_USER, pass: process.env.GMAIL_APP_PASSWORD };
+    return null;
 }
+
+function mailerReady() {
+    return !!loadMailCreds();
+}
+
+app.get('/api/mail-config', (req, res) => {
+    const c = loadMailCreds();
+    res.json({ configured: !!c, user: c ? c.user : '' });
+});
+
+app.post('/api/mail-config', (req, res) => {
+    const { user, pass } = req.body || {};
+    if (!user || !pass)
+        return res.status(400).json({ error: 'Gmail address and App Password required' });
+    fs.writeFileSync(MAIL_CONFIG_FILE,
+        JSON.stringify({ user: user.trim(), pass: pass.trim() }, null, 2));
+    res.json({ success: true, user: user.trim() });
+});
+
+app.delete('/api/mail-config', (req, res) => {
+    if (fs.existsSync(MAIL_CONFIG_FILE)) fs.unlinkSync(MAIL_CONFIG_FILE);
+    res.json({ success: true });
+});
 
 function analyzeFailures() {
     const p = path.join(__dirname, 'validation_results.xlsx');
@@ -107,7 +141,8 @@ function analyzeFailures() {
 }
 
 async function sendAlertEmail(recipients, label) {
-    if (!mailerReady()) throw new Error('GMAIL_USER / GMAIL_APP_PASSWORD env not set');
+    const creds = loadMailCreds();
+    if (!creds) throw new Error('Gmail not configured — set it in the app (Email Settings)');
     if (!recipients) throw new Error('No recipient email configured');
     const { failed, total } = analyzeFailures();
     const ok = total - failed.length;
@@ -134,10 +169,10 @@ async function sendAlertEmail(recipients, label) {
     const xlsxPath = path.join(__dirname, 'validation_results.xlsx');
     const transport = nodemailer.createTransport({
         service: 'gmail',
-        auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_APP_PASSWORD },
+        auth: { user: creds.user, pass: creds.pass },
     });
     await transport.sendMail({
-        from: process.env.GMAIL_USER,
+        from: creds.user,
         to: recipients,
         subject: `[Tag Validator] Run complete — ${failed.length} failed of ${total}`,
         html,

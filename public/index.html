@@ -276,10 +276,22 @@
 
         <!-- SCHEDULER TAB -->
         <div id="tab-scheduler" class="tab-content">
-            <div id="mailerWarn" class="sch-warn hidden">
-                ⚠ Email alerts not configured. Set <code>GMAIL_USER</code> and
-                <code>GMAIL_APP_PASSWORD</code> environment variables on the server
-                (use a Gmail App Password, not your normal password).
+            <div class="table-card glass" style="padding:18px 20px;margin-bottom:24px">
+                <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+                    <h3 style="font-size:0.95rem">📧 Email Settings (Gmail)</h3>
+                    <span id="mailState" style="font-size:0.78rem;color:#94a3b8"></span>
+                </div>
+                <div class="sch-row" style="display:flex;gap:14px;flex-wrap:wrap;margin-top:12px;align-items:center">
+                    <input type="email" id="gmailUser" class="sch-email" placeholder="yourname@gmail.com">
+                    <input type="password" id="gmailPass" class="sch-email" placeholder="16-char App Password">
+                    <button id="saveMailBtn" class="btn btn-primary">Save Gmail</button>
+                    <button id="clearMailBtn" class="btn btn-danger">Clear</button>
+                </div>
+                <div class="sch-warn" style="margin-top:12px;margin-bottom:0">
+                    Use a Gmail <b>App Password</b> (Google Account → Security → 2-Step
+                    Verification → App passwords), <b>not</b> your normal password.
+                    Saved securely on the server only.
+                </div>
             </div>
             <div class="control-bar glass">
                 <div id="uploadBoxSchedule" class="upload-box">

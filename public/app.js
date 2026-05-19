@@ -23,27 +23,8 @@ function setAuditMode(mode) {
     document.getElementById('modeTealium').classList.toggle('active', mode === 'tealium');
     document.getElementById('modeGA4').classList.toggle('active', mode === 'ga4');
     document.getElementById('modePixels').classList.toggle('active', mode === 'pixels');
-    const tabs = document.getElementById('scenarioTabs');
-    if (mode === 'pixels') {
-        tabs.classList.remove('hidden');
-        renderScenarioTabs();
-        loadRich();
-    } else {
-        tabs.classList.add('hidden');
-    }
+    if (mode === 'pixels') loadRich();
     renderTable();
-}
-
-function setScenario(sc) {
-    currentScenario = sc;
-    document.querySelectorAll('.sc-btn').forEach(b => b.classList.toggle('active', b.dataset.sc === sc));
-    renderTable();
-}
-
-function renderScenarioTabs() {
-    document.getElementById('scenarioTabs').innerHTML = scenarioList.map(sc =>
-        `<button class="sc-btn ${sc === currentScenario ? 'active' : ''}" data-sc="${sc}" onclick="setScenario('${sc}')">${sc}</button>`
-    ).join('');
 }
 
 async function loadRich() {
@@ -51,8 +32,6 @@ async function loadRich() {
         const d = await (await fetch('/api/tag-validator/results-rich')).json();
         if (d.scenarios && d.scenarios.length) scenarioList = d.scenarios;
         richResults = d.results || [];
-        if (!scenarioList.includes(currentScenario)) currentScenario = scenarioList[0];
-        renderScenarioTabs();
         if (currentAuditMode === 'pixels') renderTable();
     } catch { richResults = []; }
 }
@@ -176,9 +155,43 @@ document.addEventListener('DOMContentLoaded', () => {
         flash.innerText = r.ok ? j.message : ('Error: ' + j.error);
     };
 
-    fetch('/api/mailer-status').then(r => r.json()).then(d => {
-        document.getElementById('mailerWarn').classList.toggle('hidden', !!d.mailerReady);
-    }).catch(() => {});
+    async function refreshMailState() {
+        try {
+            const d = await (await fetch('/api/mail-config')).json();
+            const el = document.getElementById('mailState');
+            if (d.configured) {
+                el.innerHTML = `✅ Configured as <b style="color:#5eead4">${d.user}</b>`;
+                document.getElementById('gmailUser').value = d.user || '';
+            } else {
+                el.innerHTML = '⚠ Not configured — alerts will be skipped';
+            }
+        } catch { /* ignore */ }
+    }
+
+    document.getElementById('saveMailBtn').onclick = async () => {
+        const user = document.getElementById('gmailUser').value.trim();
+        const pass = document.getElementById('gmailPass').value.trim();
+        const flash = document.getElementById('schFlash');
+        if (!user || !pass) { flash.style.color = '#f87171'; flash.innerText = 'Enter Gmail + App Password'; return; }
+        const r = await fetch('/api/mail-config', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user, pass }),
+        });
+        const j = await r.json();
+        flash.style.color = r.ok ? '#5eead4' : '#f87171';
+        flash.innerText = r.ok ? 'Gmail saved' : ('Error: ' + j.error);
+        document.getElementById('gmailPass').value = '';
+        refreshMailState();
+    };
+
+    document.getElementById('clearMailBtn').onclick = async () => {
+        await fetch('/api/mail-config', { method: 'DELETE' });
+        document.getElementById('gmailUser').value = '';
+        document.getElementById('gmailPass').value = '';
+        refreshMailState();
+    };
+
+    refreshMailState();
 });
 
 const B = v => v === 'PASS' ? '<span class="badge b-pass">PASS</span>' : '<span class="badge b-fail">FAIL</span>';
@@ -204,8 +217,8 @@ function renderTable() {
             <tr>
                 <th>#</th><th>URL</th>
                 <th class="h-pix">Marketing Pixel</th>
-                <th class="h-pix">Fires</th>
-                <th class="h-pix">Fired From (Source)</th>
+                <th class="h-pix">Pixel ID</th>
+                ${scenarioList.map(s => `<th class="h-pix" style="text-align:center">${s}<br><span style="font-weight:400;text-transform:none">fires · source</span></th>`).join('')}
                 <th style="text-align:center;">Compliance</th>
             </tr>
         `;
@@ -238,7 +251,7 @@ function renderTable() {
     }
 
     if (!cachedResults.length) {
-        const ec = currentAuditMode === 'pixels' ? 6 : (currentAuditMode === 'tealium' ? 9 : 7);
+        const ec = currentAuditMode === 'pixels' ? (5 + scenarioList.length) : (currentAuditMode === 'tealium' ? 9 : 7);
         body.innerHTML = `<tr><td colspan="${ec}" class="empty-msg">Upload a file and run validation</td></tr>`;
         statsBar.classList.add('hidden');
         return;
@@ -255,9 +268,10 @@ function renderTable() {
 
     statsBar.classList.remove('hidden');
     if (currentAuditMode === 'pixels') {
-        const fires = cachedResults.reduce((a, r) => a + (Number(r[currentScenario + '_Count']) || 0), 0);
+        const tgt = scenarioList[scenarioList.length - 1] || 'Targeting';
+        const fires = cachedResults.reduce((a, r) => a + (Number(r[tgt + '_Count']) || 0), 0);
         statsBar.innerHTML = `
-            <div class="stat"><div class="stat-dot" style="background:#60a5fa;color:#60a5fa;"></div><div><div class="stat-val" style="color:#93c5fd;">${fires}</div><div class="stat-lbl">Pixel Fires · ${currentScenario}</div></div></div>
+            <div class="stat"><div class="stat-dot" style="background:#60a5fa;color:#60a5fa;"></div><div><div class="stat-val" style="color:#93c5fd;">${fires}</div><div class="stat-lbl">Pixel Fires · ${tgt}</div></div></div>
             <div class="stat"><div class="stat-dot dot-teal"></div><div><div class="stat-val val-teal">${st.compliant}/${cachedResults.length}</div><div class="stat-lbl">Compliant (no pixels w/o consent)</div></div></div>
             <div class="stat"><div class="stat-dot" style="background:#ef4444;color:#ef4444;"></div><div><div class="stat-val" style="color:#f87171;">${st.violations}/${cachedResults.length}</div><div class="stat-lbl">Violations (pixels on Necessary)</div></div></div>
         `;
@@ -277,25 +291,42 @@ function renderTable() {
     if (currentAuditMode === 'pixels') {
         const richByUrl = {};
         richResults.forEach(x => { richByUrl[x.URL] = x; });
+        const SCN = scenarioList;
         let html = '';
         cachedResults.forEach((r, i) => {
             const rich = richByUrl[r.URL];
-            const px = (rich && rich.scenarios && rich.scenarios[currentScenario]) || [];
-            const comp = `<td style="text-align:center" ${px.length ? `rowspan="${px.length}"` : ''}>${B(r.Compliance)}</td>`;
-            if (!px.length) {
-                html += `<tr><td>${i + 1}</td><td class="url-col" title="${r.URL}">${r.URL}</td>
-                    <td colspan="3" style="color:#64748b">No marketing pixels fired</td>${comp}</tr>`;
-            } else {
-                px.forEach((p, j) => {
-                    html += `<tr>
-                        ${j === 0 ? `<td rowspan="${px.length}">${i + 1}</td>
-                          <td rowspan="${px.length}" class="url-col" title="${r.URL}">${r.URL}</td>` : ''}
-                        <td><b>${p.name}</b></td>
-                        <td><span class="badge b-count">${p.count}</span></td>
-                        <td>${(p.sources || []).map(srcChip).join(' ')}</td>
-                        ${j === 0 ? comp : ''}</tr>`;
-                });
+            const scen = (rich && rich.scenarios) || {};
+            // Union of every pixel seen across all scenarios for this URL
+            const byPixel = {};
+            SCN.forEach(s => (scen[s] || []).forEach(p => {
+                const e = byPixel[p.name] || (byPixel[p.name] = { id: '', sc: {} });
+                if (!e.id && p.id) e.id = p.id;
+                e.sc[s] = { count: p.count, source: p.source };
+            }));
+            const names = Object.keys(byPixel).sort();
+            const span = names.length || 1;
+            const comp = `<td style="text-align:center" rowspan="${span}">${B(r.Compliance)}</td>`;
+
+            if (!names.length) {
+                html += `<tr><td>${i + 1}</td><td class="url-col" title="${r.URL}">${r.URL}</td>` +
+                    `<td colspan="${2 + SCN.length}" style="color:#64748b">No marketing pixels fired</td>${comp}</tr>`;
+                return;
             }
+            names.forEach((nm, j) => {
+                const e = byPixel[nm];
+                const cells = SCN.map(s => {
+                    const c = e.sc[s];
+                    if (!c) return `<td style="text-align:center;color:#475569">—</td>`;
+                    return `<td style="text-align:center"><span class="badge b-count">${c.count}</span><br>${srcChip(c.source)}</td>`;
+                }).join('');
+                html += `<tr>
+                    ${j === 0 ? `<td rowspan="${span}">${i + 1}</td>
+                      <td rowspan="${span}" class="url-col" title="${r.URL}">${r.URL}</td>` : ''}
+                    <td><b>${nm}</b></td>
+                    <td>${e.id ? '<span class="mono">' + e.id + '</span>' : '<span style="color:#475569">--</span>'}</td>
+                    ${cells}
+                    ${j === 0 ? comp : ''}</tr>`;
+            });
         });
         body.innerHTML = html;
         return;
