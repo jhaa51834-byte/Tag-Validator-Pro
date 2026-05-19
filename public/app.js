@@ -1,6 +1,9 @@
 let currentAuditMode = 'tealium';
 let cachedResults = [];
 let scheduleFile = null;
+let richResults = [];                 // per-scenario pixel data (source attribution)
+let scenarioList = ['Necessary', 'Performance', 'Functional', 'Targeting'];
+let currentScenario = 'Necessary';
 
 function switchTab(tabId) {
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
@@ -20,8 +23,42 @@ function setAuditMode(mode) {
     document.getElementById('modeTealium').classList.toggle('active', mode === 'tealium');
     document.getElementById('modeGA4').classList.toggle('active', mode === 'ga4');
     document.getElementById('modePixels').classList.toggle('active', mode === 'pixels');
-    renderTable(); // Refresh table view with new headers
+    const tabs = document.getElementById('scenarioTabs');
+    if (mode === 'pixels') {
+        tabs.classList.remove('hidden');
+        renderScenarioTabs();
+        loadRich();
+    } else {
+        tabs.classList.add('hidden');
+    }
+    renderTable();
 }
+
+function setScenario(sc) {
+    currentScenario = sc;
+    document.querySelectorAll('.sc-btn').forEach(b => b.classList.toggle('active', b.dataset.sc === sc));
+    renderTable();
+}
+
+function renderScenarioTabs() {
+    document.getElementById('scenarioTabs').innerHTML = scenarioList.map(sc =>
+        `<button class="sc-btn ${sc === currentScenario ? 'active' : ''}" data-sc="${sc}" onclick="setScenario('${sc}')">${sc}</button>`
+    ).join('');
+}
+
+async function loadRich() {
+    try {
+        const d = await (await fetch('/api/tag-validator/results-rich')).json();
+        if (d.scenarios && d.scenarios.length) scenarioList = d.scenarios;
+        richResults = d.results || [];
+        if (!scenarioList.includes(currentScenario)) currentScenario = scenarioList[0];
+        renderScenarioTabs();
+        if (currentAuditMode === 'pixels') renderTable();
+    } catch { richResults = []; }
+}
+
+const SRC_CLASS = { 'Tealium': 'src-teal', 'Adobe': 'src-adobe', 'GTM / gtag': 'src-gtm', 'Hardcoded': 'src-hard' };
+const srcChip = s => `<span class="src ${SRC_CLASS[s] || 'src-hard'}">${s}</span>`;
 
 document.addEventListener('DOMContentLoaded', () => {
     // --- MANUAL TAB LOGIC ---
@@ -111,7 +148,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const fd = new FormData();
         fd.append('file', scheduleFile);
         fd.append('frequency', scheduleFreq.value);
-        
+        fd.append('email', document.getElementById('scheduleEmail').value.trim());
+
         const r = await fetch('/api/schedule/add', { method: 'POST', body: fd });
         if (r.ok) {
             scheduleFile = null;
@@ -124,6 +162,23 @@ document.addEventListener('DOMContentLoaded', () => {
             alert("Error creating schedule");
         }
     };
+
+    document.getElementById('testEmailBtn').onclick = async () => {
+        const flash = document.getElementById('schFlash');
+        flash.style.color = '#5eead4';
+        flash.innerText = 'Sending test email...';
+        const r = await fetch('/api/test-email', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: document.getElementById('scheduleEmail').value.trim() }),
+        });
+        const j = await r.json();
+        flash.style.color = r.ok ? '#5eead4' : '#f87171';
+        flash.innerText = r.ok ? j.message : ('Error: ' + j.error);
+    };
+
+    fetch('/api/mailer-status').then(r => r.json()).then(d => {
+        document.getElementById('mailerWarn').classList.toggle('hidden', !!d.mailerReady);
+    }).catch(() => {});
 });
 
 const B = v => v === 'PASS' ? '<span class="badge b-pass">PASS</span>' : '<span class="badge b-fail">FAIL</span>';
@@ -135,6 +190,7 @@ async function loadResults() {
     if (!d.results || !d.results.length) return;
     cachedResults = d.results;
     document.getElementById('downloadBtn').classList.remove('hidden');
+    if (currentAuditMode === 'pixels') await loadRich();
     renderTable();
 }
 
@@ -146,14 +202,11 @@ function renderTable() {
     if (currentAuditMode === 'pixels') {
         head.innerHTML = `
             <tr>
-                <th rowspan="2">#</th><th rowspan="2">URL</th>
-                <th colspan="2" class="h-teal" style="text-align:center;">ACCEPT ALL</th>
-                <th colspan="2" class="h-adobe" style="text-align:center;">REJECT ALL</th>
-                <th rowspan="2" style="text-align:center;">Compliance</th>
-            </tr>
-            <tr>
-                <th class="h-teal">#</th><th class="h-teal">Marketing Pixels Fired</th>
-                <th class="h-adobe">#</th><th class="h-adobe">Pixels Fired After Reject</th>
+                <th>#</th><th>URL</th>
+                <th class="h-pix">Marketing Pixel</th>
+                <th class="h-pix">Fires</th>
+                <th class="h-pix">Fired From (Source)</th>
+                <th style="text-align:center;">Compliance</th>
             </tr>
         `;
     } else if (currentAuditMode === 'tealium') {
@@ -185,7 +238,7 @@ function renderTable() {
     }
 
     if (!cachedResults.length) {
-        const ec = currentAuditMode === 'pixels' ? 7 : (currentAuditMode === 'tealium' ? 6 : 9);
+        const ec = currentAuditMode === 'pixels' ? 6 : (currentAuditMode === 'tealium' ? 9 : 7);
         body.innerHTML = `<tr><td colspan="${ec}" class="empty-msg">Upload a file and run validation</td></tr>`;
         statsBar.classList.add('hidden');
         return;
@@ -202,9 +255,11 @@ function renderTable() {
 
     statsBar.classList.remove('hidden');
     if (currentAuditMode === 'pixels') {
+        const fires = cachedResults.reduce((a, r) => a + (Number(r[currentScenario + '_Count']) || 0), 0);
         statsBar.innerHTML = `
-            <div class="stat"><div class="stat-dot dot-teal"></div><div><div class="stat-val val-teal">${st.compliant}/${cachedResults.length}</div><div class="stat-lbl">Compliant (no pixels on reject)</div></div></div>
-            <div class="stat"><div class="stat-dot" style="background:#ef4444;color:#ef4444;"></div><div><div class="stat-val" style="color:#f87171;">${st.violations}/${cachedResults.length}</div><div class="stat-lbl">Violations (pixels fired on reject)</div></div></div>
+            <div class="stat"><div class="stat-dot" style="background:#60a5fa;color:#60a5fa;"></div><div><div class="stat-val" style="color:#93c5fd;">${fires}</div><div class="stat-lbl">Pixel Fires · ${currentScenario}</div></div></div>
+            <div class="stat"><div class="stat-dot dot-teal"></div><div><div class="stat-val val-teal">${st.compliant}/${cachedResults.length}</div><div class="stat-lbl">Compliant (no pixels w/o consent)</div></div></div>
+            <div class="stat"><div class="stat-dot" style="background:#ef4444;color:#ef4444;"></div><div><div class="stat-val" style="color:#f87171;">${st.violations}/${cachedResults.length}</div><div class="stat-lbl">Violations (pixels on Necessary)</div></div></div>
         `;
     } else if (currentAuditMode === 'tealium') {
         statsBar.innerHTML = `<div class="stat"><div class="stat-dot dot-teal"></div><div><div class="stat-val val-teal">${st.teal}/${cachedResults.length}</div><div class="stat-lbl">Tealium Detected</div></div></div>`;
@@ -219,18 +274,35 @@ function renderTable() {
         ? '<span style="color:#64748b">None</span>'
         : '<span class="mono" style="white-space:normal">' + v + '</span>';
 
+    if (currentAuditMode === 'pixels') {
+        const richByUrl = {};
+        richResults.forEach(x => { richByUrl[x.URL] = x; });
+        let html = '';
+        cachedResults.forEach((r, i) => {
+            const rich = richByUrl[r.URL];
+            const px = (rich && rich.scenarios && rich.scenarios[currentScenario]) || [];
+            const comp = `<td style="text-align:center" ${px.length ? `rowspan="${px.length}"` : ''}>${B(r.Compliance)}</td>`;
+            if (!px.length) {
+                html += `<tr><td>${i + 1}</td><td class="url-col" title="${r.URL}">${r.URL}</td>
+                    <td colspan="3" style="color:#64748b">No marketing pixels fired</td>${comp}</tr>`;
+            } else {
+                px.forEach((p, j) => {
+                    html += `<tr>
+                        ${j === 0 ? `<td rowspan="${px.length}">${i + 1}</td>
+                          <td rowspan="${px.length}" class="url-col" title="${r.URL}">${r.URL}</td>` : ''}
+                        <td><b>${p.name}</b></td>
+                        <td><span class="badge b-count">${p.count}</span></td>
+                        <td>${(p.sources || []).map(srcChip).join(' ')}</td>
+                        ${j === 0 ? comp : ''}</tr>`;
+                });
+            }
+        });
+        body.innerHTML = html;
+        return;
+    }
+
     body.innerHTML = cachedResults.map((r, i) => {
-        if (currentAuditMode === 'pixels') {
-            return `<tr>
-                <td>${i + 1}</td>
-                <td class="url-col" title="${r.URL}">${r.URL}</td>
-                <td>${ID(r.Accept_All_Count)}</td>
-                <td>${PIX(r.Accept_All_Pixels)}</td>
-                <td>${ID(r.Reject_All_Count)}</td>
-                <td>${PIX(r.Reject_All_Pixels)}</td>
-                <td style="text-align:center">${B(r.Compliance)}</td>
-            </tr>`;
-        } else if (currentAuditMode === 'tealium') {
+        if (currentAuditMode === 'tealium') {
             return `<tr>
                 <td>${i + 1}</td>
                 <td class="url-col" title="${r.URL}">${r.URL}</td>
@@ -261,17 +333,19 @@ async function loadSchedules() {
     const d = await r.json();
     const tbody = document.getElementById('schedulesBody');
     if (!d.schedules || !d.schedules.length) {
-        tbody.innerHTML = '<tr><td colspan="6" class="empty-msg">No active schedules</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" class="empty-msg">No active schedules</td></tr>';
         return;
     }
-    
+
     tbody.innerHTML = d.schedules.map(s => `
         <tr>
             <td class="mono">${s.id.substring(0,8)}</td>
             <td>${s.filename}</td>
             <td><span class="badge b-pass" style="background:rgba(139,92,246,0.1);color:#a78bfa;border-color:rgba(139,92,246,0.3);">${s.frequency}</span></td>
+            <td>${s.email ? s.email : '<span style="color:#64748b">—</span>'}</td>
             <td>${new Date(s.createdAt).toLocaleString()}</td>
             <td>${s.lastRun ? new Date(s.lastRun).toLocaleString() : 'Never'}</td>
+            <td style="white-space:normal;max-width:220px;font-size:0.7rem;color:#94a3b8">${s.lastStatus || '—'}</td>
             <td><button class="btn btn-danger" onclick="cancelSchedule('${s.id}')">Cancel</button></td>
         </tr>
     `).join('');

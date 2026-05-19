@@ -1,8 +1,12 @@
 node_modules/
 uploads/
+history/
 __pycache__/
 *.pyc
 .env
 validation_results.xlsx
+validation_results.json
 input_sites.xlsx
+schedule.json
+schedules.json
 package-lock.json

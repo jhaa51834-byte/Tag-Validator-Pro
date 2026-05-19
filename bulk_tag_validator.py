@@ -10,6 +10,7 @@ import re
 import sys
 import json
 import argparse
+import datetime
 from urllib.parse import unquote, parse_qs, urlparse
 
 stealth_obj = Stealth()
@@ -95,6 +96,52 @@ def detect_marketing_pixels(url):
         if any(f in low for f in fragments):
             found.add(name)
     return found
+
+
+# ===== CONSENT SCENARIOS (OneTrust category model) =====
+# C0001 Strictly Necessary | C0002 Performance | C0003 Functional
+# C0004 Targeting | C0005 Social Media
+SCENARIOS = ["Necessary", "Performance", "Functional", "Targeting"]
+SCENARIO_GROUPS = {
+    "Necessary":   "C0001:1,C0002:0,C0003:0,C0004:0,C0005:0",
+    "Performance": "C0001:1,C0002:1,C0003:0,C0004:0,C0005:0",
+    "Functional":  "C0001:1,C0002:0,C0003:1,C0004:0,C0005:0",
+    "Targeting":   "C0001:1,C0002:0,C0003:0,C0004:1,C0005:1",
+}
+
+# Initiator-script signatures -> who fired the request
+SOURCE_SIGNATURES = [
+    ("Tealium", ["tiqcdn.com", "tiqcdn.net", "/utag/", "tealium"]),
+    ("Adobe",   ["assets.adobedtm.com", "/satellite-", "launch-", "launch.min",
+                 "appmeasurement", "s_code", "demdex.net", "adobedc.net", "/at.js", "omtrdc"]),
+    ("GTM / gtag", ["googletagmanager.com/gtm", "googletagmanager.com/gtag",
+                    "/gtm.js", "/gtag/js"]),
+]
+
+
+def classify_source(initiator_urls, page_host):
+    """Decide who fired a request from its JS initiator stack URLs."""
+    joined = " ".join((u or "").lower() for u in initiator_urls)
+    for name, sigs in SOURCE_SIGNATURES:
+        if any(s in joined for s in sigs):
+            return name
+    return "Hardcoded"
+
+
+def _host_of(url):
+    try:
+        return urlparse(url).hostname or ""
+    except Exception:
+        return ""
+
+
+def _cookie_domain_for(url):
+    h = _host_of(url)
+    if not h:
+        return None
+    if h.startswith("www."):
+        h = h[4:]
+    return "." + h
 
 
 async def accept_cookies(page):
@@ -343,23 +390,74 @@ async def validate_tags(browser, url, index, total):
         if context: await context.close()
     return results
 
-async def _capture_pixels_for_scenario(browser, url, consent_action):
-    """Load the URL in a fresh context, perform a consent action, and return
-    the set of marketing pixels that fired. consent_action: 'accept' | 'reject'."""
-    pixels = set()
+async def _capture_pixels_for_scenario(browser, url, scenario):
+    """Load the URL once under a single OneTrust consent `scenario` and return
+    {pixel_name: {"count": int, "sources": set()}} for every marketing pixel
+    that fired. Source is attributed from the JS initiator stack via CDP."""
+    page_host = _host_of(url)
+    cdp_records = []           # list of {"url", "init":[...], "type"}
     context = None
     try:
         context = await browser.new_context(
             viewport={'width': 1280, 'height': 800},
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
         )
+
+        # Force the consent scenario via OneTrust cookies (no-op on non-OT sites)
+        dom = _cookie_domain_for(url)
+        if dom:
+            now = datetime.datetime.utcnow()
+            ts = now.strftime("%a+%b+%d+%Y+%H:%M:%S+GMT+0000")
+            optanon = (
+                f"isGpcEnabled=0&datestamp={ts}&version=202401.1.0&isIABGlobal=false"
+                f"&hosts=&consentId=00000000-0000-0000-0000-000000000000"
+                f"&interactionCount=1&landingPath=NotLandingPage"
+                f"&groups={SCENARIO_GROUPS[scenario]}&AwaitingReconsent=false"
+            )
+            try:
+                await context.add_cookies([
+                    {"name": "OptanonConsent", "value": optanon, "domain": dom, "path": "/"},
+                    {"name": "OptanonAlertBoxClosed",
+                     "value": now.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
+                     "domain": dom, "path": "/"},
+                ])
+            except Exception:
+                pass
+
         page = await context.new_page()
         await stealth_obj.apply_stealth_async(page)
 
-        def handle_request(request):
-            for p in detect_marketing_pixels(request.url):
-                pixels.add(p)
-        page.on("request", handle_request)
+        # CDP: capture each request URL with its JS initiator stack
+        try:
+            cdp = await context.new_cdp_session(page)
+            await cdp.send("Network.enable")
+
+            def on_will_be_sent(params):
+                try:
+                    req = params.get("request", {}) or {}
+                    req_url = req.get("url", "")
+                    if not req_url:
+                        return
+                    init = params.get("initiator", {}) or {}
+                    urls = []
+                    if init.get("url"):
+                        urls.append(init["url"])
+                    cur = init.get("stack") or {}
+                    depth = 0
+                    while cur and depth < 6:
+                        for fr in (cur.get("callFrames") or []):
+                            if fr.get("url"):
+                                urls.append(fr["url"])
+                        cur = cur.get("parent")
+                        depth += 1
+                    cdp_records.append({"url": req_url, "init": urls,
+                                        "type": init.get("type", "")})
+                except Exception:
+                    pass
+
+            cdp.on("Network.requestWillBeSent", on_will_be_sent)
+        except Exception:
+            pass
 
         try:
             await page.goto(url, wait_until="domcontentloaded", timeout=30000)
@@ -367,27 +465,30 @@ async def _capture_pixels_for_scenario(browser, url, consent_action):
             pass
 
         await asyncio.sleep(2)
-        if consent_action == "accept":
-            await accept_cookies(page)
-        else:
+        # Banner-level fallback for non-OneTrust CMPs
+        if scenario == "Necessary":
             await reject_cookies(page)
+        else:
+            await accept_cookies(page)
 
         try:
             await page.wait_for_load_state("networkidle", timeout=12000)
         except: pass
         await asyncio.sleep(8)
 
-        # Performance API fallback (catches pixels missed by the request listener)
-        try:
-            perf_urls = await page.evaluate("performance.getEntriesByType('resource').map(r => r.name)")
-            for u in (perf_urls or []):
-                for p in detect_marketing_pixels(u):
-                    pixels.add(p)
-        except: pass
+        pixels = {}
+        for rec in cdp_records:
+            for pname in detect_marketing_pixels(rec["url"]):
+                bucket = pixels.setdefault(pname, {"count": 0, "sources": set()})
+                bucket["count"] += 1
+                if rec.get("type") == "parser":
+                    bucket["sources"].add("Hardcoded")
+                else:
+                    bucket["sources"].add(classify_source(rec["init"], page_host))
 
         await page.close()
     except Exception:
-        pass
+        pixels = locals().get("pixels", {})
     finally:
         if context:
             try: await context.close()
@@ -396,35 +497,41 @@ async def _capture_pixels_for_scenario(browser, url, consent_action):
 
 
 async def validate_pixels(browser, url, index, total):
-    results = {
-        "URL": url,
-        "Accept_All_Pixels": "", "Accept_All_Count": 0,
-        "Reject_All_Pixels": "", "Reject_All_Count": 0,
-        "Compliance": "PASS", "Error": ""
-    }
+    results = {"URL": url, "Compliance": "PASS", "Error": ""}
+    rich = {"URL": url, "scenarios": {}}
     try:
         sys.stdout.write(f"[{index}/{total}] Checking pixels: {url}\n")
         sys.stdout.flush()
 
-        accept_pixels = await _capture_pixels_for_scenario(browser, url, "accept")
-        reject_pixels = await _capture_pixels_for_scenario(browser, url, "reject")
+        for sc in SCENARIOS:
+            px = await _capture_pixels_for_scenario(browser, url, sc)
+            total_fires = sum(b["count"] for b in px.values())
+            summary = "; ".join(
+                f"{n} x{b['count']} [{'/'.join(sorted(b['sources']))}]"
+                for n, b in sorted(px.items())
+            ) or "None"
+            results[f"{sc}_Pixels"] = summary
+            results[f"{sc}_Count"] = total_fires
+            rich["scenarios"][sc] = [
+                {"name": n, "count": b["count"], "sources": sorted(b["sources"])}
+                for n, b in sorted(px.items())
+            ]
 
-        results["Accept_All_Pixels"] = ", ".join(sorted(accept_pixels)) if accept_pixels else "None"
-        results["Accept_All_Count"] = len(accept_pixels)
-        results["Reject_All_Pixels"] = ", ".join(sorted(reject_pixels)) if reject_pixels else "None"
-        results["Reject_All_Count"] = len(reject_pixels)
-        # Compliance fails if any marketing pixel fires AFTER the user rejected consent
-        results["Compliance"] = "FAIL" if reject_pixels else "PASS"
+        # Compliance fails if any marketing pixel fires under the Necessary
+        # (no-consent) scenario.
+        results["Compliance"] = "FAIL" if results.get("Necessary_Count", 0) > 0 else "PASS"
 
         sys.stdout.write(
-            f"[{index}/{total}] Done: {url} | Accept:{len(accept_pixels)} "
-            f"Reject:{len(reject_pixels)} | {results['Compliance']}\n"
+            f"[{index}/{total}] Done: {url} | "
+            + " ".join(f"{s}:{results[f'{s}_Count']}" for s in SCENARIOS)
+            + f" | {results['Compliance']}\n"
         )
         sys.stdout.flush()
     except Exception as e:
         results["Error"] = f"Fatal: {str(e)[:80]}"
         sys.stdout.write(f"[{index}/{total}] [ERROR] {url}\n")
         sys.stdout.flush()
+    results["_rich"] = rich
     return results
 
 
@@ -453,13 +560,26 @@ async def main():
             all_results.extend(await run_batch(browser, urls[i:i + CONCURRENCY], i + 1, total, args.mode))
         await browser.close()
 
+    # Persist rich per-scenario pixel data (used by the UI for source attribution)
+    if args.mode == 'pixels':
+        rich = [r.pop("_rich") for r in all_results if "_rich" in r]
+        with open("validation_results.json", "w", encoding="utf-8") as f:
+            json.dump({"generated": datetime.datetime.now().isoformat(),
+                       "scenarios": SCENARIOS, "results": rich}, f, indent=2)
+    else:
+        for r in all_results:
+            r.pop("_rich", None)
+
     res_df = pd.DataFrame(all_results)
     if args.mode == 'tealium':
         cols = ['URL', 'Tealium_Loaded', 'Tealium_Account', 'Tealium_Profile', 'Tealium_Env', 'Adobe_Loaded', 'Adobe_ReportSuite', 'Adobe_PageView', 'Error']
     elif args.mode == 'ga4':
         cols = ['URL', 'GTM_Loaded', 'GTM_ID', 'GA4_Fired', 'GA4_Measurement_ID', 'GA4_PageView', 'Error']
     elif args.mode == 'pixels':
-        cols = ['URL', 'Accept_All_Pixels', 'Accept_All_Count', 'Reject_All_Pixels', 'Reject_All_Count', 'Compliance', 'Error']
+        cols = ['URL']
+        for sc in SCENARIOS:
+            cols += [f'{sc}_Count', f'{sc}_Pixels']
+        cols += ['Compliance', 'Error']
     else: cols = res_df.columns
     res_df[[c for c in cols if c in res_df.columns]].to_excel(output_file, index=False)
 
