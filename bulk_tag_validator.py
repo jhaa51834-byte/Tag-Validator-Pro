@@ -206,18 +206,24 @@ PIXEL_ID_PATTERNS = {
 }
 
 
-SOURCE_PRIORITY = ["Tealium", "Adobe", "GTM / gtag", "Hardcoded"]
+def pick_source(source_counts):
+    """Return the EXACT source the pixel actually fired from — the source
+    responsible for the most beacon fires (dominant origin), not a fixed
+    priority guess. `source_counts` is {source: number_of_fires}.
 
-
-def pick_source(sources):
-    """Collapse all resolved sources of a pixel into one definitive answer.
-    If ANY fire traces back to a tag manager, that manager deployed the pixel;
-    stray 'Hardcoded'-looking fires (e.g. the vendor library script itself)
-    are noise and ignored."""
-    for s in SOURCE_PRIORITY:
-        if s in sources:
+    Tie-break: a real tag manager (Tealium/Adobe/GTM) beats 'Hardcoded',
+    because a tied 'Hardcoded' is almost always just the vendor library
+    script load, while the manager is what actually deployed the tag."""
+    if not source_counts:
+        return "Hardcoded"
+    mx = max(source_counts.values())
+    top = [s for s, c in source_counts.items() if c == mx]
+    if len(top) == 1:
+        return top[0]
+    for s in ("Tealium", "Adobe", "GTM / gtag"):
+        if s in top:
             return s
-    return "Hardcoded"
+    return top[0]
 
 
 def extract_pixel_id(name, url, post_data=""):
@@ -617,7 +623,7 @@ async def _capture_pixels_for_scenario(browser, url, scenario):
         for rec in cdp_records:
             for pname in detect_marketing_pixels(rec["url"]):
                 bucket = pixels.setdefault(
-                    pname, {"count": 0, "sources": set(), "ids": set()})
+                    pname, {"count": 0, "sources": {}, "ids": set()})
                 bucket["count"] += 1
 
                 pid = extract_pixel_id(pname, rec["url"], rec.get("post", ""))
@@ -629,7 +635,7 @@ async def _capture_pixels_for_scenario(browser, url, scenario):
                     src = "Hardcoded"
                 else:
                     src = resolve_source(rec["init"], init_map, page_host)
-                bucket["sources"].add(src)
+                bucket["sources"][src] = bucket["sources"].get(src, 0) + 1
 
         await page.close()
     except Exception:

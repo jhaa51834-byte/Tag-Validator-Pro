@@ -107,14 +107,40 @@ function loadMailCreds() {
     return null;
 }
 
-function makeTransport(creds) {
-    // Explicit SMTP is more reliable than service:'gmail' on cloud hosts.
+function makeTransport(creds, port) {
+    // Timeouts are critical: without them a blocked SMTP port (common on
+    // cloud hosts) makes the request hang forever ("Sending..." stuck).
     return nodemailer.createTransport({
         host: 'smtp.gmail.com',
-        port: 465,
-        secure: true,
+        port: port,
+        secure: port === 465,            // 465 = SSL, 587 = STARTTLS
+        requireTLS: port === 587,
         auth: { user: creds.user, pass: creds.pass },
+        connectionTimeout: 12000,
+        greetingTimeout: 8000,
+        socketTimeout: 12000,
+        tls: { rejectUnauthorized: false },
     });
+}
+
+// Try SSL:465 first, then STARTTLS:587 (one is often blocked, not both).
+async function sendViaGmail(creds, message) {
+    const errors = [];
+    for (const port of [465, 587]) {
+        try {
+            await makeTransport(creds, port).sendMail(message);
+            return port;
+        } catch (e) {
+            errors.push(`port ${port}: ${(e && e.message) || e}`);
+        }
+    }
+    const blob = errors.join(' | ');
+    const blocked = /timeout|ETIMEDOUT|ECONNREFUSED|ESOCKET|ECONNECTION/i.test(blob);
+    throw new Error(
+        (blocked
+            ? 'Could not reach Gmail SMTP — the host is blocking outbound SMTP ports. '
+            : 'Gmail rejected the login. Use a 16-char App Password (2-Step Verification ON). ')
+        + blob);
 }
 
 function mailerReady() {
@@ -187,23 +213,14 @@ async function sendAlertEmail(recipients, label) {
         <p style="color:#94a3b8;font-size:12px;margin-top:16px">Full report attached.</p>
       </div>`;
     const xlsxPath = path.join(__dirname, 'validation_results.xlsx');
-    const transport = makeTransport(creds);
-    try {
-        await transport.sendMail({
-            from: `Tag Validator <${creds.user}>`,
-            to: recipients,
-            subject: `[Tag Validator] Run complete — ${failed.length} failed of ${total}`,
-            html,
-            attachments: fs.existsSync(xlsxPath)
-                ? [{ filename: 'Tag-Validation-Report.xlsx', path: xlsxPath }] : [],
-        });
-    } catch (e) {
-        const msg = String(e && e.message || e);
-        throw new Error(msg +
-            ' — Gmail needs 2-Step Verification ON and a 16-char App Password ' +
-            '(not your normal password). Generate at myaccount.google.com → ' +
-            'Security → App passwords.');
-    }
+    await sendViaGmail(creds, {
+        from: `Tag Validator <${creds.user}>`,
+        to: recipients,
+        subject: `[Tag Validator] Run complete — ${failed.length} failed of ${total}`,
+        html,
+        attachments: fs.existsSync(xlsxPath)
+            ? [{ filename: 'Tag-Validation-Report.xlsx', path: xlsxPath }] : [],
+    });
     return { total, failed: failed.length };
 }
 
