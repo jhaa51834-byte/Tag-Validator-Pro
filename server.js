@@ -66,7 +66,9 @@ app.get('/api/tag-validator/results', (req, res) => {
 
 app.get('/api/tag-validator/download', (req, res) => {
     const p = path.join(__dirname, 'validation_results.xlsx');
-    res.download(p, 'Results.xlsx');
+    if (!fs.existsSync(p))
+        return res.status(404).send('No report yet — run a validation first.');
+    res.download(p, 'Tag-Validation-Report.xlsx');
 });
 
 // Rich per-scenario pixel data (source attribution) for the Pixels view
@@ -84,17 +86,32 @@ app.get('/api/tag-validator/results-rich', (req, res) => {
 // --- Email alerts ---
 const MAIL_CONFIG_FILE = path.join(__dirname, 'mail_config.json');
 
+// Gmail App Passwords are shown as "abcd efgh ijkl mnop" — the spaces are
+// presentational only and MUST be removed before authenticating.
+const cleanPass = p => String(p || '').replace(/\s+/g, '');
+
 function loadMailCreds() {
     // In-app config takes precedence; env vars are a fallback.
     if (fs.existsSync(MAIL_CONFIG_FILE)) {
         try {
             const c = JSON.parse(fs.readFileSync(MAIL_CONFIG_FILE, 'utf8'));
-            if (c.user && c.pass) return { user: c.user, pass: c.pass };
+            if (c.user && c.pass)
+                return { user: String(c.user).trim(), pass: cleanPass(c.pass) };
         } catch { /* ignore */ }
     }
     if (process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD)
-        return { user: process.env.GMAIL_USER, pass: process.env.GMAIL_APP_PASSWORD };
+        return { user: process.env.GMAIL_USER.trim(), pass: cleanPass(process.env.GMAIL_APP_PASSWORD) };
     return null;
+}
+
+function makeTransport(creds) {
+    // Explicit SMTP is more reliable than service:'gmail' on cloud hosts.
+    return nodemailer.createTransport({
+        host: 'smtp.gmail.com',
+        port: 465,
+        secure: true,
+        auth: { user: creds.user, pass: creds.pass },
+    });
 }
 
 function mailerReady() {
@@ -111,7 +128,7 @@ app.post('/api/mail-config', (req, res) => {
     if (!user || !pass)
         return res.status(400).json({ error: 'Gmail address and App Password required' });
     fs.writeFileSync(MAIL_CONFIG_FILE,
-        JSON.stringify({ user: user.trim(), pass: pass.trim() }, null, 2));
+        JSON.stringify({ user: user.trim(), pass: cleanPass(pass) }, null, 2));
     res.json({ success: true, user: user.trim() });
 });
 
@@ -167,12 +184,15 @@ async function sendAlertEmail(recipients, label) {
         <p style="color:#94a3b8;font-size:12px;margin-top:16px">Full report attached.</p>
       </div>`;
     const xlsxPath = path.join(__dirname, 'validation_results.xlsx');
-    const transport = nodemailer.createTransport({
-        service: 'gmail',
-        auth: { user: creds.user, pass: creds.pass },
-    });
+    const transport = makeTransport(creds);
+    try {
+        await transport.verify();
+    } catch (e) {
+        throw new Error('Gmail auth failed: ' + (e.message || e) +
+            ' — use a 16-char App Password (2-Step Verification must be ON).');
+    }
     await transport.sendMail({
-        from: creds.user,
+        from: `Tag Validator <${creds.user}>`,
         to: recipients,
         subject: `[Tag Validator] Run complete — ${failed.length} failed of ${total}`,
         html,

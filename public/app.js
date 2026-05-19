@@ -2,8 +2,8 @@ let currentAuditMode = 'tealium';
 let cachedResults = [];
 let scheduleFile = null;
 let richResults = [];                 // per-scenario pixel data (source attribution)
-let scenarioList = ['Necessary', 'Performance', 'Functional', 'Targeting'];
-let currentScenario = 'Necessary';
+let scenarioList = ['Accept All', 'Reject All', 'Performance', 'Functional', 'Targeting'];
+let currentScenario = 'Accept All';
 
 function switchTab(tabId) {
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
@@ -23,16 +23,36 @@ function setAuditMode(mode) {
     document.getElementById('modeTealium').classList.toggle('active', mode === 'tealium');
     document.getElementById('modeGA4').classList.toggle('active', mode === 'ga4');
     document.getElementById('modePixels').classList.toggle('active', mode === 'pixels');
-    if (mode === 'pixels') loadRich();
+    const sct = document.getElementById('scenarioTabs');
+    if (mode === 'pixels') {
+        sct.classList.remove('hidden');
+        renderScenarioTabs();
+        loadRich();
+    } else {
+        sct.classList.add('hidden');
+    }
     renderTable();
+}
+
+function setScenario(sc) {
+    currentScenario = sc;
+    renderScenarioTabs();
+    renderTable();
+}
+
+function renderScenarioTabs() {
+    document.getElementById('scenarioTabs').innerHTML = scenarioList.map(sc =>
+        `<button class="sc-btn ${sc === currentScenario ? 'active' : ''}" onclick="setScenario('${sc.replace(/'/g, "\\'")}')">${sc}</button>`
+    ).join('');
 }
 
 async function loadRich() {
     try {
         const d = await (await fetch('/api/tag-validator/results-rich')).json();
         if (d.scenarios && d.scenarios.length) scenarioList = d.scenarios;
+        if (!scenarioList.includes(currentScenario)) currentScenario = scenarioList[0];
         richResults = d.results || [];
-        if (currentAuditMode === 'pixels') renderTable();
+        if (currentAuditMode === 'pixels') { renderScenarioTabs(); renderTable(); }
     } catch { richResults = []; }
 }
 
@@ -218,7 +238,8 @@ function renderTable() {
                 <th>#</th><th>URL</th>
                 <th class="h-pix">Marketing Pixel</th>
                 <th class="h-pix">Pixel ID</th>
-                ${scenarioList.map(s => `<th class="h-pix" style="text-align:center">${s}<br><span style="font-weight:400;text-transform:none">fires · source</span></th>`).join('')}
+                <th class="h-pix" style="text-align:center">Fires</th>
+                <th class="h-pix">Fired From (Source)</th>
                 <th style="text-align:center;">Compliance</th>
             </tr>
         `;
@@ -251,7 +272,7 @@ function renderTable() {
     }
 
     if (!cachedResults.length) {
-        const ec = currentAuditMode === 'pixels' ? (5 + scenarioList.length) : (currentAuditMode === 'tealium' ? 9 : 7);
+        const ec = currentAuditMode === 'pixels' ? 7 : (currentAuditMode === 'tealium' ? 9 : 7);
         body.innerHTML = `<tr><td colspan="${ec}" class="empty-msg">Upload a file and run validation</td></tr>`;
         statsBar.classList.add('hidden');
         return;
@@ -268,12 +289,11 @@ function renderTable() {
 
     statsBar.classList.remove('hidden');
     if (currentAuditMode === 'pixels') {
-        const tgt = scenarioList[scenarioList.length - 1] || 'Targeting';
-        const fires = cachedResults.reduce((a, r) => a + (Number(r[tgt + '_Count']) || 0), 0);
+        const fires = cachedResults.reduce((a, r) => a + (Number(r[currentScenario + '_Count']) || 0), 0);
         statsBar.innerHTML = `
-            <div class="stat"><div class="stat-dot" style="background:#60a5fa;color:#60a5fa;"></div><div><div class="stat-val" style="color:#93c5fd;">${fires}</div><div class="stat-lbl">Pixel Fires · ${tgt}</div></div></div>
-            <div class="stat"><div class="stat-dot dot-teal"></div><div><div class="stat-val val-teal">${st.compliant}/${cachedResults.length}</div><div class="stat-lbl">Compliant (no pixels w/o consent)</div></div></div>
-            <div class="stat"><div class="stat-dot" style="background:#ef4444;color:#ef4444;"></div><div><div class="stat-val" style="color:#f87171;">${st.violations}/${cachedResults.length}</div><div class="stat-lbl">Violations (pixels on Necessary)</div></div></div>
+            <div class="stat"><div class="stat-dot" style="background:#60a5fa;color:#60a5fa;"></div><div><div class="stat-val" style="color:#93c5fd;">${fires}</div><div class="stat-lbl">Pixel Fires · ${currentScenario}</div></div></div>
+            <div class="stat"><div class="stat-dot dot-teal"></div><div><div class="stat-val val-teal">${st.compliant}/${cachedResults.length}</div><div class="stat-lbl">Compliant (no pixels on Reject All)</div></div></div>
+            <div class="stat"><div class="stat-dot" style="background:#ef4444;color:#ef4444;"></div><div><div class="stat-val" style="color:#f87171;">${st.violations}/${cachedResults.length}</div><div class="stat-lbl">Violations (pixels after Reject All)</div></div></div>
         `;
     } else if (currentAuditMode === 'tealium') {
         statsBar.innerHTML = `<div class="stat"><div class="stat-dot dot-teal"></div><div><div class="stat-val val-teal">${st.teal}/${cachedResults.length}</div><div class="stat-lbl">Tealium Detected</div></div></div>`;
@@ -291,40 +311,25 @@ function renderTable() {
     if (currentAuditMode === 'pixels') {
         const richByUrl = {};
         richResults.forEach(x => { richByUrl[x.URL] = x; });
-        const SCN = scenarioList;
         let html = '';
         cachedResults.forEach((r, i) => {
             const rich = richByUrl[r.URL];
-            const scen = (rich && rich.scenarios) || {};
-            // Union of every pixel seen across all scenarios for this URL
-            const byPixel = {};
-            SCN.forEach(s => (scen[s] || []).forEach(p => {
-                const e = byPixel[p.name] || (byPixel[p.name] = { id: '', sc: {} });
-                if (!e.id && p.id) e.id = p.id;
-                e.sc[s] = { count: p.count, source: p.source };
-            }));
-            const names = Object.keys(byPixel).sort();
-            const span = names.length || 1;
+            const px = (rich && rich.scenarios && rich.scenarios[currentScenario]) || [];
+            const span = px.length || 1;
             const comp = `<td style="text-align:center" rowspan="${span}">${B(r.Compliance)}</td>`;
-
-            if (!names.length) {
+            if (!px.length) {
                 html += `<tr><td>${i + 1}</td><td class="url-col" title="${r.URL}">${r.URL}</td>` +
-                    `<td colspan="${2 + SCN.length}" style="color:#64748b">No marketing pixels fired</td>${comp}</tr>`;
+                    `<td colspan="4" style="color:#64748b">No marketing pixels fired in “${currentScenario}”</td>${comp}</tr>`;
                 return;
             }
-            names.forEach((nm, j) => {
-                const e = byPixel[nm];
-                const cells = SCN.map(s => {
-                    const c = e.sc[s];
-                    if (!c) return `<td style="text-align:center;color:#475569">—</td>`;
-                    return `<td style="text-align:center"><span class="badge b-count">${c.count}</span><br>${srcChip(c.source)}</td>`;
-                }).join('');
+            px.forEach((p, j) => {
                 html += `<tr>
                     ${j === 0 ? `<td rowspan="${span}">${i + 1}</td>
                       <td rowspan="${span}" class="url-col" title="${r.URL}">${r.URL}</td>` : ''}
-                    <td><b>${nm}</b></td>
-                    <td>${e.id ? '<span class="mono">' + e.id + '</span>' : '<span style="color:#475569">--</span>'}</td>
-                    ${cells}
+                    <td><b>${p.name}</b></td>
+                    <td>${p.id ? '<span class="mono">' + p.id + '</span>' : '<span style="color:#475569">--</span>'}</td>
+                    <td style="text-align:center"><span class="badge b-count">${p.count}</span></td>
+                    <td>${srcChip(p.source)}</td>
                     ${j === 0 ? comp : ''}</tr>`;
             });
         });

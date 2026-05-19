@@ -101,12 +101,23 @@ def detect_marketing_pixels(url):
 # ===== CONSENT SCENARIOS (OneTrust category model) =====
 # C0001 Strictly Necessary | C0002 Performance | C0003 Functional
 # C0004 Targeting | C0005 Social Media
-SCENARIOS = ["Necessary", "Performance", "Functional", "Targeting"]
+SCENARIOS = ["Accept All", "Reject All", "Performance", "Functional", "Targeting"]
 SCENARIO_GROUPS = {
-    "Necessary":   "C0001:1,C0002:0,C0003:0,C0004:0,C0005:0",
+    "Accept All":  "C0001:1,C0002:1,C0003:1,C0004:1,C0005:1",
+    "Reject All":  "C0001:1,C0002:0,C0003:0,C0004:0,C0005:0",
     "Performance": "C0001:1,C0002:1,C0003:0,C0004:0,C0005:0",
     "Functional":  "C0001:1,C0002:0,C0003:1,C0004:0,C0005:0",
     "Targeting":   "C0001:1,C0002:0,C0003:0,C0004:1,C0005:1",
+}
+# Banner action per scenario for non-OneTrust CMPs:
+#   Reject All -> click the reject/deny button
+#   others     -> accept the banner (full / category consent)
+SCENARIO_ACTION = {
+    "Accept All": "accept",
+    "Reject All": "reject",
+    "Performance": "accept",
+    "Functional": "accept",
+    "Targeting": "accept",
 }
 
 # Initiator-script signatures -> who fired the request
@@ -553,11 +564,13 @@ async def _capture_pixels_for_scenario(browser, url, scenario):
             pass
 
         await asyncio.sleep(2)
-        # Banner-level fallback for non-OneTrust CMPs
-        if scenario == "Necessary":
-            await reject_cookies(page)
-        else:
+        # Banner-level action for non-OneTrust CMPs
+        action = SCENARIO_ACTION.get(scenario, "accept")
+        if action == "accept":
             await accept_cookies(page)
+        elif action == "reject":
+            await reject_cookies(page)
+        # 'none' -> leave the banner untouched (pure baseline)
 
         try:
             await page.wait_for_load_state("networkidle", timeout=12000)
@@ -622,9 +635,9 @@ async def validate_pixels(browser, url, index, total):
                 for n, b in sorted(px.items())
             ]
 
-        # Compliance fails if any marketing pixel fires under the Necessary
-        # (no-consent) scenario.
-        results["Compliance"] = "FAIL" if results.get("Necessary_Count", 0) > 0 else "PASS"
+        # Compliance fails if any marketing pixel fires after an explicit
+        # Reject All (consent violation).
+        results["Compliance"] = "FAIL" if results.get("Reject All_Count", 0) > 0 else "PASS"
 
         sys.stdout.write(
             f"[{index}/{total}] Done: {url} | "
