@@ -109,15 +109,19 @@ SCENARIO_GROUPS = {
     "Functional":  "C0001:1,C0002:0,C0003:1,C0004:0,C0005:0",
     "Targeting":   "C0001:1,C0002:0,C0003:0,C0004:1,C0005:1",
 }
-# Banner action per scenario for non-OneTrust CMPs:
-#   Reject All -> click the reject/deny button
-#   others     -> accept the banner (full / category consent)
+# Banner action per scenario:
+#   Accept All -> click Accept-All  (full consent)
+#   Reject All -> click Reject-All  (no consent)
+#   Performance / Functional / Targeting -> DO NOT click any button.
+#     Clicking "Accept All" would grant FULL consent and destroy the
+#     partial-category meaning. The injected OneTrust OptanonConsent cookie
+#     (set per category below) is what governs these scenarios.
 SCENARIO_ACTION = {
     "Accept All": "accept",
     "Reject All": "reject",
-    "Performance": "accept",
-    "Functional": "accept",
-    "Targeting": "accept",
+    "Performance": "none",
+    "Functional": "none",
+    "Targeting": "none",
 }
 
 # Initiator-script signatures -> who fired the request
