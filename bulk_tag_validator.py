@@ -558,13 +558,13 @@ async def _capture_pixels_for_scenario(browser, url, scenario):
         except Exception:
             pass
 
+        # ---- PASS 1: open the page and APPLY the consent choice ----
         try:
             await page.goto(url, wait_until="domcontentloaded", timeout=30000)
         except Exception:
             pass
 
         await asyncio.sleep(2)
-        # Banner-level action for non-OneTrust CMPs
         action = SCENARIO_ACTION.get(scenario, "accept")
         if action == "accept":
             await accept_cookies(page)
@@ -572,10 +572,36 @@ async def _capture_pixels_for_scenario(browser, url, scenario):
             await reject_cookies(page)
         # 'none' -> leave the banner untouched (pure baseline)
 
+        # Give the CMP a moment to persist the consent (cookie / localStorage)
+        try:
+            await page.wait_for_load_state("networkidle", timeout=8000)
+        except: pass
+        await asyncio.sleep(3)
+
+        # ---- PASS 2: RELOAD with the consent state now in effect ----
+        # Only requests from here on are counted. This is what a real user
+        # sees on their next page view after choosing consent, so a site
+        # that respects consent will NOT fire marketing pixels after Reject.
+        cdp_records.clear()
+        try:
+            await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+        except Exception:
+            try:
+                await page.reload(wait_until="domcontentloaded", timeout=30000)
+            except Exception:
+                pass
+
+        await asyncio.sleep(2)
+        # Re-apply the banner choice if the CMP shows it again on reload
+        if action == "accept":
+            await accept_cookies(page)
+        elif action == "reject":
+            await reject_cookies(page)
+
         try:
             await page.wait_for_load_state("networkidle", timeout=12000)
         except: pass
-        await asyncio.sleep(8)
+        await asyncio.sleep(7)
 
         # Build the request->initiator graph (first load of each script wins)
         init_map = {}

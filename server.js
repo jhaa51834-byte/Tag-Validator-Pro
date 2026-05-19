@@ -29,6 +29,7 @@ const upload = multer({ dest: 'uploads/' });
 // --- Manual Run Logic ---
 let validatorProcess = null;
 let validatorLogs = [];
+let lastRunMode = 'tealium';
 
 app.post('/api/tag-validator/upload', upload.single('file'), (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
@@ -40,6 +41,7 @@ app.post('/api/tag-validator/upload', upload.single('file'), (req, res) => {
 app.post('/api/tag-validator/run', (req, res) => {
     if (validatorProcess) return res.status(400).json({ error: 'Running' });
     const mode = req.body.mode || 'tealium'; // Default to tealium if not specified
+    lastRunMode = mode;
     validatorLogs = [`Starting Manual Run (${mode.toUpperCase()} MODE)...` ];
     const pyCmd = process.platform === 'win32' ? 'python' : 'python3';
     validatorProcess = spawn(pyCmd, ['-u', 'bulk_tag_validator.py', '--mode', mode], { cwd: __dirname });
@@ -68,7 +70,8 @@ app.get('/api/tag-validator/download', (req, res) => {
     const p = path.join(__dirname, 'validation_results.xlsx');
     if (!fs.existsSync(p))
         return res.status(404).send('No report yet — run a validation first.');
-    res.download(p, 'Tag-Validation-Report.xlsx');
+    const label = { tealium: 'Tealium-Adobe', ga4: 'GA4-GTM', pixels: 'Marketing-Pixels' }[lastRunMode] || lastRunMode;
+    res.download(p, `Report-${label}.xlsx`);
 });
 
 // Rich per-scenario pixel data (source attribution) for the Pixels view
@@ -186,19 +189,21 @@ async function sendAlertEmail(recipients, label) {
     const xlsxPath = path.join(__dirname, 'validation_results.xlsx');
     const transport = makeTransport(creds);
     try {
-        await transport.verify();
+        await transport.sendMail({
+            from: `Tag Validator <${creds.user}>`,
+            to: recipients,
+            subject: `[Tag Validator] Run complete — ${failed.length} failed of ${total}`,
+            html,
+            attachments: fs.existsSync(xlsxPath)
+                ? [{ filename: 'Tag-Validation-Report.xlsx', path: xlsxPath }] : [],
+        });
     } catch (e) {
-        throw new Error('Gmail auth failed: ' + (e.message || e) +
-            ' — use a 16-char App Password (2-Step Verification must be ON).');
+        const msg = String(e && e.message || e);
+        throw new Error(msg +
+            ' — Gmail needs 2-Step Verification ON and a 16-char App Password ' +
+            '(not your normal password). Generate at myaccount.google.com → ' +
+            'Security → App passwords.');
     }
-    await transport.sendMail({
-        from: `Tag Validator <${creds.user}>`,
-        to: recipients,
-        subject: `[Tag Validator] Run complete — ${failed.length} failed of ${total}`,
-        html,
-        attachments: fs.existsSync(xlsxPath)
-            ? [{ filename: 'Tag-Validation-Report.xlsx', path: xlsxPath }] : [],
-    });
     return { total, failed: failed.length };
 }
 
