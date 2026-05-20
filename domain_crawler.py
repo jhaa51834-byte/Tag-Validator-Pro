@@ -31,9 +31,20 @@ SKIP_EXTENSIONS = (
 )
 
 
+# Index filenames that mean the same as the parent directory
+INDEX_FILES = ('index.html', 'index.htm', 'index.php', 'index.aspx',
+               'default.html', 'default.htm', 'default.aspx', 'home.html')
+
+
 def normalize_url(url: str) -> str:
-    """https + lowercase host + strip www + drop fragment + drop trailing slash.
-    Ensures http/https and www/non-www variants collapse into a single key."""
+    """Aggressive canonicalization so the same logical page never appears twice:
+    - force https + lowercase host + strip www
+    - drop fragment
+    - drop query string entirely (kills the ?utm_source=, ?sort=, ?page=N variant
+      explosion that makes 'unlimited' crawls never terminate)
+    - strip trailing slash and /index.html-style files
+    - collapse duplicate slashes
+    """
     try:
         url = url.strip()
         if not url:
@@ -50,9 +61,16 @@ def normalize_url(url: str) -> str:
             host = host.rsplit(":", 1)[0]
         path = p.path or "/"
         path = re.sub(r'/+', '/', path)
+        # /foo/index.html -> /foo
+        lower_path = path.lower()
+        for idx in INDEX_FILES:
+            if lower_path.endswith("/" + idx):
+                path = path[: -(len(idx) + 1)] or "/"
+                break
         if len(path) > 1 and path.endswith("/"):
             path = path[:-1]
-        return urllib.parse.urlunparse(("https", host, path, "", p.query, ""))
+        # Query string and fragment dropped — only the canonical page identity matters
+        return urllib.parse.urlunparse(("https", host, path, "", "", ""))
     except Exception:
         return ""
 
@@ -215,7 +233,10 @@ def crawl(start_url: str, max_pages: int = 0):
     target_host = get_host(start_norm)
     path_prefix = derive_path_prefix(start_norm)  # e.g. "/de" when user pastes /de/
     unlimited = (max_pages <= 0)
-    limit_str = "unlimited" if unlimited else f"max {max_pages}"
+    # Hard safety cap even in "unlimited" mode — prevents accidental runaway on
+    # sites with crawler traps. 50000 is way bigger than any real site needs.
+    HARD_CAP = 50000
+    limit_str = "unlimited (safety cap 50000)" if unlimited else f"max {max_pages}"
     scope = f"{target_host}{path_prefix}" if path_prefix else target_host
     print(f"Crawling: {scope} ({limit_str})")
     if path_prefix:
@@ -245,9 +266,17 @@ def crawl(start_url: str, max_pages: int = 0):
             queued.add(u)
             queue.append(u)
 
-    # Step 2: BFS crawl
+    # Step 2: BFS crawl. Loop terminates when:
+    #   - queue empties (every link has been followed)
+    #   - max_pages reached (when not unlimited)
+    #   - HARD_CAP reached (safety net even in unlimited mode)
     while queue:
         if not unlimited and len(discovered) >= max_pages:
+            break
+        if len(discovered) >= HARD_CAP:
+            print(f"Hard safety cap ({HARD_CAP}) reached — stopping. "
+                  f"This site is larger than expected or has a crawler trap.")
+            sys.stdout.flush()
             break
         url = queue.popleft()
         if url in visited:
