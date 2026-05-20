@@ -231,6 +231,7 @@
     <div class="main">
         <div class="tabs">
             <button class="tab-btn active" onclick="switchTab('manual')">Live Validation</button>
+            <button class="tab-btn" onclick="switchTab('domain')">Domain Crawl</button>
             <button class="tab-btn" onclick="switchTab('scheduler')">Automated Schedules</button>
         </div>
 
@@ -268,6 +269,70 @@
                         </thead>
                         <tbody id="resultsBody">
                             <tr><td colspan="6" class="empty-msg">Upload a file and run validation</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- DOMAIN CRAWL TAB -->
+        <div id="tab-domain" class="tab-content">
+            <div class="mode-selector">
+                <button id="dcModeTealium" class="mode-btn active" onclick="setDomainMode('tealium')">Tealium Audit</button>
+                <button id="dcModeGA4" class="mode-btn" onclick="setDomainMode('ga4')">GA4/Adobe Audit</button>
+                <button id="dcModePixels" class="mode-btn" onclick="setDomainMode('pixels')">Marketing Pixels</button>
+            </div>
+
+            <div class="control-bar glass">
+                <input type="text" id="domainInput" class="sch-email" style="flex:2; min-width:280px;"
+                       placeholder="https://example.com">
+                <input type="number" id="maxPagesInput" class="sch-email" style="width:120px;"
+                       value="50" min="1" max="500" title="Max pages to crawl">
+                <button id="discoverBtn" class="btn btn-primary">Discover URLs</button>
+                <button id="crawlValidateBtn" class="btn btn-primary"
+                        style="background: linear-gradient(135deg, #14b8a6, #3b82f6);">Crawl + Validate</button>
+                <div id="dcProgressSection" class="progress-section hidden">
+                    <span id="dcProgressLabel" style="font-size:0.8rem; color:var(--muted)">0/0</span>
+                    <div class="progress-track"><div id="dcProgressBar" class="progress-fill"></div></div>
+                </div>
+                <button id="downloadUrlsBtn" class="btn btn-download hidden">Download URL List</button>
+                <button id="dcDownloadBtn" class="btn btn-download hidden">Download Report</button>
+            </div>
+
+            <div class="sch-warn" style="margin-bottom:16px;">
+                URLs are normalized: <code>http</code>/<code>https</code> and <code>www</code>/non-<code>www</code>
+                treated as the same page so duplicates don't appear. Crawler stays inside the target domain only.
+            </div>
+
+            <div id="dcLogBox" class="log-box hidden">System Ready... Enter a URL above to begin.</div>
+
+            <div class="table-card glass" style="margin-bottom:24px;">
+                <div class="table-bar">
+                    <h3>Discovered URLs <span id="dcUrlCount" style="color:var(--muted); font-weight:500; margin-left:8px;"></span></h3>
+                    <button id="validateDiscoveredBtn" class="btn btn-primary hidden" style="padding:6px 14px; font-size:0.78rem;">Validate These URLs</button>
+                </div>
+                <div class="table-wrap" style="max-height:320px;">
+                    <table>
+                        <thead><tr><th style="width:60px;">#</th><th>URL</th></tr></thead>
+                        <tbody id="dcUrlListBody">
+                            <tr><td colspan="2" class="empty-msg">Enter a domain URL and click Discover</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div id="dcScenarioTabs" class="scenario-tabs hidden"></div>
+            <div id="dcStatsBar" class="stats-bar hidden"></div>
+
+            <div class="table-card glass">
+                <div class="table-bar">
+                    <h3 id="dcTableTitle">Validation Results</h3>
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <thead id="dcTableHead"></thead>
+                        <tbody id="dcResultsBody">
+                            <tr><td colspan="6" class="empty-msg">Run Crawl + Validate to see tag audit per page</td></tr>
                         </tbody>
                     </table>
                 </div>

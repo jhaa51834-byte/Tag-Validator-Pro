@@ -411,3 +411,307 @@ async function loadHistory() {
         </tr>
     `).join('');
 }
+
+// =============== DOMAIN CRAWL ===============
+let dcMode = 'tealium';
+let dcPollHandle = null;
+let dcCachedResults = [];
+let dcRichResults = [];
+
+function setDomainMode(mode) {
+    dcMode = mode;
+    document.getElementById('dcModeTealium').classList.toggle('active', mode === 'tealium');
+    document.getElementById('dcModeGA4').classList.toggle('active', mode === 'ga4');
+    document.getElementById('dcModePixels').classList.toggle('active', mode === 'pixels');
+    document.getElementById('dcScenarioTabs').classList.toggle('hidden', mode !== 'pixels');
+    if (mode === 'pixels') renderDcScenarioTabs();
+    renderDcTable();
+}
+
+function renderDcScenarioTabs() {
+    document.getElementById('dcScenarioTabs').innerHTML = scenarioList.map(sc =>
+        `<button class="sc-btn ${sc === currentScenario ? 'active' : ''}" onclick="setDcScenario('${sc.replace(/'/g, "\\'")}')">${sc}</button>`
+    ).join('');
+}
+
+function setDcScenario(sc) {
+    currentScenario = sc;
+    renderDcScenarioTabs();
+    renderDcTable();
+}
+
+function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const discoverBtn = document.getElementById('discoverBtn');
+    const crawlValidateBtn = document.getElementById('crawlValidateBtn');
+    const validateDiscoveredBtn = document.getElementById('validateDiscoveredBtn');
+    const downloadUrlsBtn = document.getElementById('downloadUrlsBtn');
+    const dcDownloadBtn = document.getElementById('dcDownloadBtn');
+
+    if (discoverBtn) discoverBtn.onclick = () => startDomainRun(false);
+    if (crawlValidateBtn) crawlValidateBtn.onclick = () => startDomainRun(true);
+
+    if (validateDiscoveredBtn) validateDiscoveredBtn.onclick = async () => {
+        validateDiscoveredBtn.disabled = true;
+        validateDiscoveredBtn.innerText = 'Validating...';
+        document.getElementById('dcLogBox').classList.remove('hidden');
+        document.getElementById('dcProgressSection').classList.remove('hidden');
+        await fetch('/api/tag-validator/run', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mode: dcMode }),
+        });
+        pollDomainStatus(true);
+    };
+
+    if (downloadUrlsBtn) downloadUrlsBtn.onclick = () => window.location.href = '/api/tag-validator/crawled-urls/download';
+    if (dcDownloadBtn) dcDownloadBtn.onclick = () => window.location.href = '/api/tag-validator/download';
+});
+
+async function startDomainRun(alsoValidate) {
+    const url = document.getElementById('domainInput').value.trim();
+    if (!url) { alert('Please enter a domain URL (e.g. https://example.com)'); return; }
+    const maxPages = parseInt(document.getElementById('maxPagesInput').value, 10) || 50;
+
+    const discoverBtn = document.getElementById('discoverBtn');
+    const crawlValidateBtn = document.getElementById('crawlValidateBtn');
+    discoverBtn.disabled = true;
+    crawlValidateBtn.disabled = true;
+    discoverBtn.innerText = alsoValidate ? 'Working...' : 'Crawling...';
+    if (alsoValidate) crawlValidateBtn.innerText = 'Working...';
+
+    document.getElementById('dcLogBox').classList.remove('hidden');
+    document.getElementById('dcLogBox').innerHTML = '';
+    document.getElementById('dcProgressSection').classList.remove('hidden');
+    document.getElementById('dcUrlListBody').innerHTML = '<tr><td colspan="2" class="empty-msg">Crawling...</td></tr>';
+    document.getElementById('dcUrlCount').innerText = '';
+    document.getElementById('downloadUrlsBtn').classList.add('hidden');
+    document.getElementById('dcDownloadBtn').classList.add('hidden');
+    document.getElementById('validateDiscoveredBtn').classList.add('hidden');
+    dcCachedResults = [];
+    renderDcTable();
+
+    const endpoint = alsoValidate ? '/api/tag-validator/crawl-and-validate' : '/api/tag-validator/crawl';
+    await fetch(endpoint, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url, maxPages, mode: dcMode }),
+    });
+
+    pollDomainStatus(alsoValidate);
+}
+
+function pollDomainStatus(expectValidation) {
+    const logBox = document.getElementById('dcLogBox');
+    if (dcPollHandle) clearInterval(dcPollHandle);
+
+    let urlsLoaded = false;
+
+    dcPollHandle = setInterval(async () => {
+        const r = await fetch('/api/tag-validator/status');
+        const d = await r.json();
+        const logs = (d.logs || []).filter(l => !l.includes('DeprecationWarning') && !l.includes('Pyarrow') && l.trim());
+        logBox.innerHTML = logs.map(l => '<div>' + escapeHtml(l) + '</div>').join('');
+        logBox.scrollTop = logBox.scrollHeight;
+
+        const last = [...logs].reverse().find(l => l.match(/\[\d+\/\d+\]/));
+        if (last) {
+            const m = last.match(/\[(\d+)\/(\d+)\]/);
+            if (m) {
+                const c = +m[1], t = +m[2], pct = Math.round(c / t * 100);
+                document.getElementById('dcProgressLabel').innerText = c + '/' + t;
+                document.getElementById('dcProgressBar').style.width = pct + '%';
+            }
+        }
+
+        // Load discovered URLs as soon as the crawl phase finishes (even mid-pipeline)
+        if (!urlsLoaded && logs.some(l => l.includes('Crawl finished'))) {
+            urlsLoaded = true;
+            await loadDcCrawledUrls();
+        }
+
+        if (!d.running) {
+            clearInterval(dcPollHandle);
+            dcPollHandle = null;
+
+            const discoverBtn = document.getElementById('discoverBtn');
+            const crawlValidateBtn = document.getElementById('crawlValidateBtn');
+            const validateDiscoveredBtn = document.getElementById('validateDiscoveredBtn');
+            discoverBtn.disabled = false;
+            crawlValidateBtn.disabled = false;
+            discoverBtn.innerText = 'Discover URLs';
+            crawlValidateBtn.innerText = 'Crawl + Validate';
+            validateDiscoveredBtn.disabled = false;
+            validateDiscoveredBtn.innerText = 'Validate These URLs';
+
+            if (!urlsLoaded) await loadDcCrawledUrls();
+            await loadDcResults();
+        }
+    }, 800);
+}
+
+async function loadDcCrawledUrls() {
+    const r = await fetch('/api/tag-validator/crawled-urls');
+    const d = await r.json();
+    const urls = d.urls || [];
+    const body = document.getElementById('dcUrlListBody');
+    const countEl = document.getElementById('dcUrlCount');
+    countEl.innerText = urls.length ? `· ${urls.length} pages` : '';
+    if (!urls.length) {
+        body.innerHTML = '<tr><td colspan="2" class="empty-msg">No URLs discovered. Check the URL or try again.</td></tr>';
+        return;
+    }
+    body.innerHTML = urls.map((u, i) =>
+        `<tr><td>${i + 1}</td><td class="url-col" title="${escapeHtml(u)}"><a href="${escapeHtml(u)}" target="_blank" style="color:#a78bfa; text-decoration:none;">${escapeHtml(u)}</a></td></tr>`
+    ).join('');
+    document.getElementById('downloadUrlsBtn').classList.remove('hidden');
+    document.getElementById('validateDiscoveredBtn').classList.remove('hidden');
+}
+
+async function loadDcResults() {
+    const r = await fetch('/api/tag-validator/results');
+    const d = await r.json();
+    if (!d.results || !d.results.length) { renderDcTable(); return; }
+    dcCachedResults = d.results;
+    document.getElementById('dcDownloadBtn').classList.remove('hidden');
+    if (dcMode === 'pixels') {
+        try {
+            const rr = await (await fetch('/api/tag-validator/results-rich')).json();
+            if (rr.scenarios && rr.scenarios.length) scenarioList = rr.scenarios;
+            if (!scenarioList.includes(currentScenario)) currentScenario = scenarioList[0];
+            dcRichResults = rr.results || [];
+            renderDcScenarioTabs();
+        } catch { dcRichResults = []; }
+    }
+    renderDcTable();
+}
+
+function renderDcTable() {
+    const head = document.getElementById('dcTableHead');
+    const body = document.getElementById('dcResultsBody');
+    const statsBar = document.getElementById('dcStatsBar');
+    if (!head) return;
+
+    if (dcMode === 'pixels') {
+        head.innerHTML = `
+            <tr>
+                <th>#</th><th>URL</th>
+                <th class="h-pix">Marketing Pixel</th>
+                <th class="h-pix">Pixel ID</th>
+                <th class="h-pix" style="text-align:center">Fires</th>
+                <th class="h-pix">Fired From (Source)</th>
+                <th style="text-align:center;">Compliance</th>
+            </tr>`;
+    } else if (dcMode === 'tealium') {
+        head.innerHTML = `
+            <tr>
+                <th rowspan="2">#</th><th rowspan="2">URL</th>
+                <th colspan="4" class="h-teal" style="text-align:center;">TEALIUM ANALYTICS</th>
+                <th colspan="3" class="h-adobe" style="text-align:center;">ADOBE ANALYTICS</th>
+            </tr>
+            <tr>
+                <th class="h-teal">Loaded</th><th class="h-teal">Account</th><th class="h-teal">Profile</th><th class="h-teal">Env</th>
+                <th class="h-adobe">Loaded</th><th class="h-adobe">Report Suite</th><th class="h-adobe">Page View</th>
+            </tr>`;
+    } else {
+        head.innerHTML = `
+            <tr>
+                <th rowspan="2">#</th><th rowspan="2">URL</th>
+                <th colspan="2" class="h-adobe" style="text-align:center; background:rgba(255,255,255,0.05)">GTM</th>
+                <th colspan="3" class="h-adobe" style="text-align:center; background: rgba(59, 130, 246, 0.15); color: #60a5fa;">GA4</th>
+            </tr>
+            <tr>
+                <th style="background:rgba(255,255,255,0.03)">Loaded</th><th style="background:rgba(255,255,255,0.03)">GTM ID</th>
+                <th class="h-adobe" style="background: rgba(59, 130, 246, 0.15); color: #60a5fa;">Fired</th>
+                <th class="h-adobe" style="background: rgba(59, 130, 246, 0.15); color: #60a5fa;">Measurement ID</th>
+                <th class="h-adobe" style="background: rgba(59, 130, 246, 0.15); color: #60a5fa;">Page View</th>
+            </tr>`;
+    }
+
+    if (!dcCachedResults.length) {
+        const ec = dcMode === 'pixels' ? 7 : (dcMode === 'tealium' ? 9 : 7);
+        body.innerHTML = `<tr><td colspan="${ec}" class="empty-msg">Run Crawl + Validate to see tag audit per page</td></tr>`;
+        statsBar.classList.add('hidden');
+        return;
+    }
+
+    let st = { teal: 0, adobe: 0, ga4: 0, compliant: 0, violations: 0 };
+    dcCachedResults.forEach(r => {
+        if (r.Tealium_Loaded === 'PASS') st.teal++;
+        if (r.Adobe_Loaded === 'PASS') st.adobe++;
+        if (r.GA4_Fired === 'PASS') st.ga4++;
+        if (r.Compliance === 'PASS') st.compliant++;
+        if (r.Compliance === 'FAIL') st.violations++;
+    });
+
+    statsBar.classList.remove('hidden');
+    if (dcMode === 'pixels') {
+        const fires = dcCachedResults.reduce((a, r) => a + (Number(r[currentScenario + '_Count']) || 0), 0);
+        statsBar.innerHTML = `
+            <div class="stat"><div class="stat-dot" style="background:#60a5fa;color:#60a5fa;"></div><div><div class="stat-val" style="color:#93c5fd;">${fires}</div><div class="stat-lbl">Pixel Fires · ${currentScenario}</div></div></div>
+            <div class="stat"><div class="stat-dot dot-teal"></div><div><div class="stat-val val-teal">${st.compliant}/${dcCachedResults.length}</div><div class="stat-lbl">Compliant</div></div></div>
+            <div class="stat"><div class="stat-dot" style="background:#ef4444;color:#ef4444;"></div><div><div class="stat-val" style="color:#f87171;">${st.violations}/${dcCachedResults.length}</div><div class="stat-lbl">Violations</div></div></div>`;
+    } else if (dcMode === 'tealium') {
+        statsBar.innerHTML = `<div class="stat"><div class="stat-dot dot-teal"></div><div><div class="stat-val val-teal">${st.teal}/${dcCachedResults.length}</div><div class="stat-lbl">Tealium Detected</div></div></div>`;
+    } else {
+        statsBar.innerHTML = `
+            <div class="stat"><div class="stat-dot dot-adobe"></div><div><div class="stat-val val-adobe">${st.adobe}/${dcCachedResults.length}</div><div class="stat-lbl">Adobe Detected</div></div></div>
+            <div class="stat"><div class="stat-dot" style="background:#60a5fa; color:#60a5fa;"></div><div><div class="stat-val" style="color:#93c5fd;">${st.ga4}/${dcCachedResults.length}</div><div class="stat-lbl">GA4 Detected</div></div></div>`;
+    }
+
+    if (dcMode === 'pixels') {
+        const richByUrl = {};
+        dcRichResults.forEach(x => { richByUrl[x.URL] = x; });
+        let html = '';
+        dcCachedResults.forEach((r, i) => {
+            const rich = richByUrl[r.URL];
+            const px = (rich && rich.scenarios && rich.scenarios[currentScenario]) || [];
+            const span = px.length || 1;
+            const comp = `<td style="text-align:center" rowspan="${span}">${B(r.Compliance)}</td>`;
+            if (!px.length) {
+                html += `<tr><td>${i + 1}</td><td class="url-col" title="${r.URL}">${r.URL}</td>` +
+                    `<td colspan="4" style="color:#64748b">No marketing pixels fired in “${currentScenario}”</td>${comp}</tr>`;
+                return;
+            }
+            px.forEach((p, j) => {
+                html += `<tr>
+                    ${j === 0 ? `<td rowspan="${span}">${i + 1}</td>
+                      <td rowspan="${span}" class="url-col" title="${r.URL}">${r.URL}</td>` : ''}
+                    <td><b>${p.name}</b></td>
+                    <td>${p.id ? '<span class="mono">' + p.id + '</span>' : '<span style="color:#475569">--</span>'}</td>
+                    <td style="text-align:center"><span class="badge b-count">${p.count}</span></td>
+                    <td>${srcChip(p.source)}</td>
+                    ${j === 0 ? comp : ''}</tr>`;
+            });
+        });
+        body.innerHTML = html;
+        return;
+    }
+
+    body.innerHTML = dcCachedResults.map((r, i) => {
+        if (dcMode === 'tealium') {
+            return `<tr>
+                <td>${i + 1}</td>
+                <td class="url-col" title="${r.URL}">${r.URL}</td>
+                <td>${B(r.Tealium_Loaded)}</td>
+                <td>${ID(r.Tealium_Account)}</td>
+                <td>${ID(r.Tealium_Profile)}</td>
+                <td>${ID(r.Tealium_Env)}</td>
+                <td>${B(r.Adobe_Loaded)}</td>
+                <td>${ID(r.Adobe_ReportSuite)}</td>
+                <td>${B(r.Adobe_PageView)}</td>
+            </tr>`;
+        } else {
+            return `<tr>
+                <td>${i + 1}</td>
+                <td class="url-col" title="${r.URL}">${r.URL}</td>
+                <td>${B(r.GTM_Loaded)}</td>
+                <td>${ID(r.GTM_ID)}</td>
+                <td>${B(r.GA4_Fired)}</td>
+                <td>${ID(r.GA4_Measurement_ID)}</td>
+                <td>${B(r.GA4_PageView)}</td>
+            </tr>`;
+        }
+    }).join('');
+}

@@ -74,6 +74,77 @@ app.get('/api/tag-validator/download', (req, res) => {
     res.download(p, `Report-${label}.xlsx`);
 });
 
+// === DOMAIN CRAWL: discover same-domain URLs ===
+app.post('/api/tag-validator/crawl', (req, res) => {
+    if (validatorProcess) return res.status(400).json({ error: 'Running' });
+    const { url, maxPages } = req.body || {};
+    if (!url) return res.status(400).json({ error: 'URL required' });
+    const max = Math.max(1, Math.min(parseInt(maxPages, 10) || 50, 500));
+
+    ['crawled_urls.xlsx', 'validation_results.xlsx', 'validation_results.json'].forEach(f => {
+        const p = path.join(__dirname, f);
+        if (fs.existsSync(p)) fs.unlinkSync(p);
+    });
+
+    validatorLogs = [`Crawling ${url} (max ${max} pages)...`];
+    const pyCmd = process.platform === 'win32' ? 'python' : 'python3';
+    validatorProcess = spawn(pyCmd, ['-u', 'domain_crawler.py', url, String(max)], { cwd: __dirname });
+    validatorProcess.stdout.on('data', d => validatorLogs.push(d.toString().trim()));
+    validatorProcess.stderr.on('data', d => validatorLogs.push("ERROR: " + d.toString().trim()));
+    validatorProcess.on('close', code => {
+        validatorLogs.push(`Crawl finished with code ${code}`);
+        validatorProcess = null;
+    });
+    res.json({ success: true });
+});
+
+// === DOMAIN CRAWL + VALIDATE chained ===
+app.post('/api/tag-validator/crawl-and-validate', (req, res) => {
+    if (validatorProcess) return res.status(400).json({ error: 'Running' });
+    const { url, maxPages, mode } = req.body || {};
+    if (!url) return res.status(400).json({ error: 'URL required' });
+    const max = Math.max(1, Math.min(parseInt(maxPages, 10) || 50, 500));
+    const auditMode = mode || 'tealium';
+    lastRunMode = auditMode;
+
+    ['crawled_urls.xlsx', 'validation_results.xlsx', 'validation_results.json'].forEach(f => {
+        const p = path.join(__dirname, f);
+        if (fs.existsSync(p)) fs.unlinkSync(p);
+    });
+
+    validatorLogs = [`Crawling ${url} (max ${max} pages)...`];
+    const pyCmd = process.platform === 'win32' ? 'python' : 'python3';
+    validatorProcess = spawn(pyCmd, ['-u', 'domain_crawler.py', url, String(max)], { cwd: __dirname });
+    validatorProcess.stdout.on('data', d => validatorLogs.push(d.toString().trim()));
+    validatorProcess.stderr.on('data', d => validatorLogs.push("ERROR: " + d.toString().trim()));
+    validatorProcess.on('close', code => {
+        validatorLogs.push(`Crawl finished (code ${code}). Starting ${auditMode.toUpperCase()} validation...`);
+        if (code !== 0) { validatorProcess = null; return; }
+        validatorProcess = spawn(pyCmd, ['-u', 'bulk_tag_validator.py', '--mode', auditMode], { cwd: __dirname });
+        validatorProcess.stdout.on('data', d => validatorLogs.push(d.toString().trim()));
+        validatorProcess.stderr.on('data', d => validatorLogs.push("ERROR: " + d.toString().trim()));
+        validatorProcess.on('close', c2 => {
+            validatorLogs.push(`Validation finished with code ${c2}`);
+            validatorProcess = null;
+        });
+    });
+    res.json({ success: true });
+});
+
+app.get('/api/tag-validator/crawled-urls', (req, res) => {
+    const p = path.join(__dirname, 'crawled_urls.xlsx');
+    if (!fs.existsSync(p)) return res.json({ urls: [] });
+    const wb = XLSX.readFile(p);
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
+    res.json({ urls: rows.map(r => r.URL).filter(Boolean) });
+});
+
+app.get('/api/tag-validator/crawled-urls/download', (req, res) => {
+    const p = path.join(__dirname, 'crawled_urls.xlsx');
+    if (!fs.existsSync(p)) return res.status(404).send('No crawled URL list — run a crawl first.');
+    res.download(p, 'Crawled_URLs.xlsx');
+});
+
 // Rich per-scenario pixel data (source attribution) for the Pixels view
 app.get('/api/tag-validator/results-rich', (req, res) => {
     const p = path.join(__dirname, 'validation_results.json');
