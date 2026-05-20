@@ -82,14 +82,18 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
+    const cancelBtn = document.getElementById('cancelBtn');
+
     runBtn.onclick = async () => {
         runBtn.disabled = true;
         runBtn.innerText = 'Validating...';
+        cancelBtn.classList.remove('hidden');
+        cancelBtn.disabled = false;
         logBox.classList.remove('hidden');
         document.getElementById('progressSection').classList.remove('hidden');
 
         // Pass mode to the run command
-        await fetch('/api/tag-validator/run', { 
+        await fetch('/api/tag-validator/run', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ mode: currentAuditMode })
@@ -115,10 +119,19 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!d.running) {
                 clearInterval(poll);
                 runBtn.disabled = false;
-                runBtn.innerText = 'Run Again';
+                runBtn.innerText = d.cancelled ? 'Cancelled — Run Again' : 'Run Again';
+                cancelBtn.classList.add('hidden');
                 loadResults();
             }
         }, 800);
+    };
+
+    cancelBtn.onclick = async () => {
+        if (!confirm('Cancel the running validation? Partial results may not be saved.')) return;
+        cancelBtn.disabled = true;
+        cancelBtn.innerText = 'Cancelling...';
+        await fetch('/api/tag-validator/cancel', { method: 'POST' });
+        // Polling loop will detect !running and clean up UI state
     };
 
     downloadBtn.onclick = () => window.location.href = '/api/tag-validator/download';
@@ -459,6 +472,12 @@ document.addEventListener('DOMContentLoaded', () => {
         validateDiscoveredBtn.innerText = 'Validating...';
         document.getElementById('dcLogBox').classList.remove('hidden');
         document.getElementById('dcProgressSection').classList.remove('hidden');
+        const dcCancelBtn = document.getElementById('dcCancelBtn');
+        if (dcCancelBtn) {
+            dcCancelBtn.classList.remove('hidden');
+            dcCancelBtn.disabled = false;
+            dcCancelBtn.innerText = 'Cancel';
+        }
         await fetch('/api/tag-validator/run', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ mode: dcMode }),
@@ -468,6 +487,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (downloadUrlsBtn) downloadUrlsBtn.onclick = () => window.location.href = '/api/tag-validator/crawled-urls/download';
     if (dcDownloadBtn) dcDownloadBtn.onclick = () => window.location.href = '/api/tag-validator/download';
+
+    const dcCancelBtn = document.getElementById('dcCancelBtn');
+    if (dcCancelBtn) dcCancelBtn.onclick = async () => {
+        if (!confirm('Cancel the crawl/validation? Partial discovered URLs will still be saved.')) return;
+        dcCancelBtn.disabled = true;
+        dcCancelBtn.innerText = 'Cancelling...';
+        await fetch('/api/tag-validator/cancel', { method: 'POST' });
+        // pollDomainStatus loop detects !running and cleans up
+    };
 });
 
 async function startDomainRun(alsoValidate) {
@@ -480,10 +508,16 @@ async function startDomainRun(alsoValidate) {
 
     const discoverBtn = document.getElementById('discoverBtn');
     const crawlValidateBtn = document.getElementById('crawlValidateBtn');
+    const dcCancelBtn = document.getElementById('dcCancelBtn');
     discoverBtn.disabled = true;
     crawlValidateBtn.disabled = true;
     discoverBtn.innerText = alsoValidate ? 'Working...' : 'Crawling...';
     if (alsoValidate) crawlValidateBtn.innerText = 'Working...';
+    if (dcCancelBtn) {
+        dcCancelBtn.classList.remove('hidden');
+        dcCancelBtn.disabled = false;
+        dcCancelBtn.innerText = 'Cancel';
+    }
 
     document.getElementById('dcLogBox').classList.remove('hidden');
     document.getElementById('dcLogBox').innerHTML = '';
@@ -541,12 +575,14 @@ function pollDomainStatus(expectValidation) {
             const discoverBtn = document.getElementById('discoverBtn');
             const crawlValidateBtn = document.getElementById('crawlValidateBtn');
             const validateDiscoveredBtn = document.getElementById('validateDiscoveredBtn');
+            const dcCancelBtn = document.getElementById('dcCancelBtn');
             discoverBtn.disabled = false;
             crawlValidateBtn.disabled = false;
-            discoverBtn.innerText = 'Discover URLs';
-            crawlValidateBtn.innerText = 'Crawl + Validate';
+            discoverBtn.innerText = d.cancelled ? 'Cancelled — Discover URLs' : 'Discover URLs';
+            crawlValidateBtn.innerText = d.cancelled ? 'Cancelled — Crawl + Validate' : 'Crawl + Validate';
             validateDiscoveredBtn.disabled = false;
             validateDiscoveredBtn.innerText = 'Validate These URLs';
+            if (dcCancelBtn) dcCancelBtn.classList.add('hidden');
 
             if (!urlsLoaded) await loadDcCrawledUrls();
             await loadDcResults();

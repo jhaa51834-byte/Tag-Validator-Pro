@@ -30,6 +30,30 @@ const upload = multer({ dest: 'uploads/' });
 let validatorProcess = null;
 let validatorLogs = [];
 let lastRunMode = 'tealium';
+let cancelRequested = false;
+
+function killValidatorProcess(reason = 'cancelled by user') {
+    if (!validatorProcess) return false;
+    cancelRequested = true;
+    try {
+        if (process.platform === 'win32') {
+            // SIGTERM doesn't kill child processes on Windows reliably; use taskkill /T
+            spawn('taskkill', ['/pid', String(validatorProcess.pid), '/f', '/t']);
+        } else {
+            validatorProcess.kill('SIGTERM');
+        }
+    } catch (e) {
+        try { validatorProcess.kill(); } catch { /* ignore */ }
+    }
+    validatorLogs.push(`>>> ${reason}`);
+    return true;
+}
+
+app.post('/api/tag-validator/cancel', (req, res) => {
+    if (!validatorProcess) return res.json({ success: false, message: 'Nothing is running' });
+    killValidatorProcess('Cancelled by user');
+    res.json({ success: true });
+});
 
 app.post('/api/tag-validator/upload', upload.single('file'), (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
@@ -42,6 +66,7 @@ app.post('/api/tag-validator/run', (req, res) => {
     if (validatorProcess) return res.status(400).json({ error: 'Running' });
     const mode = req.body.mode || 'tealium'; // Default to tealium if not specified
     lastRunMode = mode;
+    cancelRequested = false;
     validatorLogs = [`Starting Manual Run (${mode.toUpperCase()} MODE)...` ];
     const pyCmd = process.platform === 'win32' ? 'python' : 'python3';
     validatorProcess = spawn(pyCmd, ['-u', 'bulk_tag_validator.py', '--mode', mode], { cwd: __dirname });
@@ -49,14 +74,14 @@ app.post('/api/tag-validator/run', (req, res) => {
     validatorProcess.stdout.on('data', d => validatorLogs.push(d.toString().trim()));
     validatorProcess.stderr.on('data', d => validatorLogs.push("ERROR: " + d.toString().trim()));
     validatorProcess.on('close', code => {
-        validatorLogs.push(`Finished with code ${code}`);
+        validatorLogs.push(cancelRequested ? 'Run cancelled.' : `Finished with code ${code}`);
         validatorProcess = null;
     });
     res.json({ success: true });
 });
 
 app.get('/api/tag-validator/status', (req, res) => {
-    res.json({ running: !!validatorProcess, logs: validatorLogs.slice(-20) });
+    res.json({ running: !!validatorProcess, cancelled: cancelRequested && !validatorProcess, logs: validatorLogs.slice(-20) });
 });
 
 app.get('/api/tag-validator/results', (req, res) => {
@@ -88,13 +113,14 @@ app.post('/api/tag-validator/crawl', (req, res) => {
         if (fs.existsSync(p)) fs.unlinkSync(p);
     });
 
+    cancelRequested = false;
     validatorLogs = [`Crawling ${url} (${max === 0 ? 'unlimited' : 'max ' + max} pages)...`];
     const pyCmd = process.platform === 'win32' ? 'python' : 'python3';
     validatorProcess = spawn(pyCmd, ['-u', 'domain_crawler.py', url, String(max)], { cwd: __dirname });
     validatorProcess.stdout.on('data', d => validatorLogs.push(d.toString().trim()));
     validatorProcess.stderr.on('data', d => validatorLogs.push("ERROR: " + d.toString().trim()));
     validatorProcess.on('close', code => {
-        validatorLogs.push(`Crawl finished with code ${code}`);
+        validatorLogs.push(cancelRequested ? 'Crawl cancelled.' : `Crawl finished with code ${code}`);
         validatorProcess = null;
     });
     res.json({ success: true });
@@ -115,19 +141,25 @@ app.post('/api/tag-validator/crawl-and-validate', (req, res) => {
         if (fs.existsSync(p)) fs.unlinkSync(p);
     });
 
+    cancelRequested = false;
     validatorLogs = [`Crawling ${url} (${max === 0 ? 'unlimited' : 'max ' + max} pages)...`];
     const pyCmd = process.platform === 'win32' ? 'python' : 'python3';
     validatorProcess = spawn(pyCmd, ['-u', 'domain_crawler.py', url, String(max)], { cwd: __dirname });
     validatorProcess.stdout.on('data', d => validatorLogs.push(d.toString().trim()));
     validatorProcess.stderr.on('data', d => validatorLogs.push("ERROR: " + d.toString().trim()));
     validatorProcess.on('close', code => {
+        if (cancelRequested) {
+            validatorLogs.push('Crawl cancelled. Validation phase skipped.');
+            validatorProcess = null;
+            return;
+        }
         validatorLogs.push(`Crawl finished (code ${code}). Starting ${auditMode.toUpperCase()} validation...`);
         if (code !== 0) { validatorProcess = null; return; }
         validatorProcess = spawn(pyCmd, ['-u', 'bulk_tag_validator.py', '--mode', auditMode], { cwd: __dirname });
         validatorProcess.stdout.on('data', d => validatorLogs.push(d.toString().trim()));
         validatorProcess.stderr.on('data', d => validatorLogs.push("ERROR: " + d.toString().trim()));
         validatorProcess.on('close', c2 => {
-            validatorLogs.push(`Validation finished with code ${c2}`);
+            validatorLogs.push(cancelRequested ? 'Validation cancelled.' : `Validation finished with code ${c2}`);
             validatorProcess = null;
         });
     });
