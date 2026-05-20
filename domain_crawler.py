@@ -67,6 +67,33 @@ def get_host(url: str) -> str:
         return ""
 
 
+def get_path(url: str) -> str:
+    """Return the normalized URL's path (e.g. '/de' or '/' )."""
+    try:
+        return urllib.parse.urlparse(url).path or "/"
+    except Exception:
+        return "/"
+
+
+def derive_path_prefix(start_norm: str) -> str:
+    """If user pasted https://site.com/de/, restrict the crawl to URLs whose path
+    starts with /de (with a slash boundary). Returns '' to mean 'no restriction'."""
+    path = get_path(start_norm)
+    if not path or path == "/":
+        return ""
+    # path is already normalized (no trailing slash unless root)
+    return path
+
+
+def matches_prefix(url: str, prefix: str) -> bool:
+    """True if the URL's path is at or under the prefix.
+    Empty prefix = match everything on the host."""
+    if not prefix:
+        return True
+    p = get_path(url)
+    return p == prefix or p.startswith(prefix + "/")
+
+
 class LinkExtractor(HTMLParser):
     def __init__(self):
         super().__init__()
@@ -127,8 +154,9 @@ def parse_sitemap(xml_text: str, base_url: str):
     return pages, sitemaps
 
 
-def load_sitemaps(start_url: str, target_host: str):
-    """Try /sitemap.xml and /robots.txt → Sitemap entries. Returns list of normalized page URLs."""
+def load_sitemaps(start_url: str, target_host: str, path_prefix: str = ""):
+    """Try /sitemap.xml and /robots.txt → Sitemap entries.
+    Returns normalized page URLs that are on the target host AND under path_prefix."""
     discovered = []
     seen = set()
     queue = deque()
@@ -163,7 +191,9 @@ def load_sitemaps(start_url: str, target_host: str):
             pages, children = parse_sitemap(text, sm_url)
             for p in pages:
                 n = normalize_url(p)
-                if n and get_host(n) == target_host and n not in seen:
+                if (n and get_host(n) == target_host
+                        and matches_prefix(n, path_prefix)
+                        and n not in seen):
                     seen.add(n)
                     discovered.append(n)
             for c in children:
@@ -183,17 +213,22 @@ def crawl(start_url: str, max_pages: int = 0):
         return []
 
     target_host = get_host(start_norm)
+    path_prefix = derive_path_prefix(start_norm)  # e.g. "/de" when user pastes /de/
     unlimited = (max_pages <= 0)
     limit_str = "unlimited" if unlimited else f"max {max_pages}"
-    print(f"Crawling domain: {target_host} ({limit_str})")
+    scope = f"{target_host}{path_prefix}" if path_prefix else target_host
+    print(f"Crawling: {scope} ({limit_str})")
+    if path_prefix:
+        print(f"Path filter active: only URLs under '{path_prefix}/' will be kept "
+              f"(other regions/locales like /tr-tr/, /en-us/, etc. excluded).")
     sys.stdout.flush()
 
     # Step 1: seed from sitemap.xml / robots.txt sitemaps (cheap, fast, exhaustive)
     print("Looking up sitemap.xml / robots.txt...")
     sys.stdout.flush()
-    sitemap_urls = load_sitemaps(start_norm, target_host)
+    sitemap_urls = load_sitemaps(start_norm, target_host, path_prefix)
     if sitemap_urls:
-        print(f"Sitemap gave {len(sitemap_urls)} URLs (will still BFS-crawl to catch unlinked pages).")
+        print(f"Sitemap gave {len(sitemap_urls)} in-scope URLs (will still BFS-crawl to catch unlinked pages).")
         sys.stdout.flush()
 
     visited = set()         # URLs we've already fetched
@@ -230,8 +265,13 @@ def crawl(start_url: str, max_pages: int = 0):
             sys.stdout.flush()
             continue
 
-        # Record the page if it's on the target domain and not yet recorded
-        if final_norm and get_host(final_norm) == target_host and final_norm not in discovered_set:
+        # Record the page only if it's on the target host AND inside the path prefix.
+        # The prefix check is what prevents /tr-tr/, /en-us/ etc. from leaking in
+        # when the user started from /de/.
+        if (final_norm
+                and get_host(final_norm) == target_host
+                and matches_prefix(final_norm, path_prefix)
+                and final_norm not in discovered_set):
             discovered.append(final_norm)
             discovered_set.add(final_norm)
             progress_label = f"[{len(discovered)}/{'inf' if unlimited else max_pages}]"
@@ -261,6 +301,10 @@ def crawl(start_url: str, max_pages: int = 0):
                 continue
             n = normalize_url(abs_url)
             if not n or get_host(n) != target_host:
+                continue
+            # Don't even queue out-of-scope URLs (saves HTTP fetches + prevents the
+            # crawl from drifting into other locales via cross-region links).
+            if not matches_prefix(n, path_prefix):
                 continue
             if n not in queued:
                 queued.add(n)
