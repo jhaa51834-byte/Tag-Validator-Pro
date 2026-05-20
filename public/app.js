@@ -473,7 +473,10 @@ document.addEventListener('DOMContentLoaded', () => {
 async function startDomainRun(alsoValidate) {
     const url = document.getElementById('domainInput').value.trim();
     if (!url) { alert('Please enter a domain URL (e.g. https://example.com)'); return; }
-    const maxPages = parseInt(document.getElementById('maxPagesInput').value, 10) || 50;
+    // 0 (or empty) = unlimited - crawl every reachable page on the site
+    const rawVal = document.getElementById('maxPagesInput').value;
+    const parsed = parseInt(rawVal, 10);
+    const maxPages = (Number.isFinite(parsed) && parsed > 0) ? parsed : 0;
 
     const discoverBtn = document.getElementById('discoverBtn');
     const crawlValidateBtn = document.getElementById('crawlValidateBtn');

@@ -286,8 +286,9 @@
             <div class="control-bar glass">
                 <input type="text" id="domainInput" class="sch-email" style="flex:2; min-width:280px;"
                        placeholder="https://example.com">
-                <input type="number" id="maxPagesInput" class="sch-email" style="width:120px;"
-                       value="50" min="1" max="500" title="Max pages to crawl">
+                <input type="number" id="maxPagesInput" class="sch-email" style="width:140px;"
+                       value="0" min="0" title="Max pages to crawl (0 = unlimited, crawl every page on the site)"
+                       placeholder="0 = unlimited">
                 <button id="discoverBtn" class="btn btn-primary">Discover URLs</button>
                 <button id="crawlValidateBtn" class="btn btn-primary"
                         style="background: linear-gradient(135deg, #14b8a6, #3b82f6);">Crawl + Validate</button>
@@ -300,8 +301,9 @@
             </div>
 
             <div class="sch-warn" style="margin-bottom:16px;">
-                URLs are normalized: <code>http</code>/<code>https</code> and <code>www</code>/non-<code>www</code>
-                treated as the same page so duplicates don't appear. Crawler stays inside the target domain only.
+                Set <b>Max pages = 0</b> for <b>unlimited</b> (crawl every reachable page on the site).
+                Uses <code>sitemap.xml</code> + BFS for full coverage. URLs are normalized so
+                <code>http</code>/<code>https</code> and <code>www</code>/non-<code>www</code> never duplicate.
             </div>
 
             <div id="dcLogBox" class="log-box hidden">System Ready... Enter a URL above to begin.</div>

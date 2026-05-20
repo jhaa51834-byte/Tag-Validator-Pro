@@ -79,14 +79,16 @@ app.post('/api/tag-validator/crawl', (req, res) => {
     if (validatorProcess) return res.status(400).json({ error: 'Running' });
     const { url, maxPages } = req.body || {};
     if (!url) return res.status(400).json({ error: 'URL required' });
-    const max = Math.max(1, Math.min(parseInt(maxPages, 10) || 50, 500));
+    // 0 or missing = unlimited (crawl every reachable same-domain page)
+    const rawMax = parseInt(maxPages, 10);
+    const max = (Number.isFinite(rawMax) && rawMax > 0) ? rawMax : 0;
 
     ['crawled_urls.xlsx', 'validation_results.xlsx', 'validation_results.json'].forEach(f => {
         const p = path.join(__dirname, f);
         if (fs.existsSync(p)) fs.unlinkSync(p);
     });
 
-    validatorLogs = [`Crawling ${url} (max ${max} pages)...`];
+    validatorLogs = [`Crawling ${url} (${max === 0 ? 'unlimited' : 'max ' + max} pages)...`];
     const pyCmd = process.platform === 'win32' ? 'python' : 'python3';
     validatorProcess = spawn(pyCmd, ['-u', 'domain_crawler.py', url, String(max)], { cwd: __dirname });
     validatorProcess.stdout.on('data', d => validatorLogs.push(d.toString().trim()));
@@ -103,7 +105,8 @@ app.post('/api/tag-validator/crawl-and-validate', (req, res) => {
     if (validatorProcess) return res.status(400).json({ error: 'Running' });
     const { url, maxPages, mode } = req.body || {};
     if (!url) return res.status(400).json({ error: 'URL required' });
-    const max = Math.max(1, Math.min(parseInt(maxPages, 10) || 50, 500));
+    const rawMax = parseInt(maxPages, 10);
+    const max = (Number.isFinite(rawMax) && rawMax > 0) ? rawMax : 0;
     const auditMode = mode || 'tealium';
     lastRunMode = auditMode;
 
@@ -112,7 +115,7 @@ app.post('/api/tag-validator/crawl-and-validate', (req, res) => {
         if (fs.existsSync(p)) fs.unlinkSync(p);
     });
 
-    validatorLogs = [`Crawling ${url} (max ${max} pages)...`];
+    validatorLogs = [`Crawling ${url} (${max === 0 ? 'unlimited' : 'max ' + max} pages)...`];
     const pyCmd = process.platform === 'win32' ? 'python' : 'python3';
     validatorProcess = spawn(pyCmd, ['-u', 'domain_crawler.py', url, String(max)], { cwd: __dirname });
     validatorProcess.stdout.on('data', d => validatorLogs.push(d.toString().trim()));
