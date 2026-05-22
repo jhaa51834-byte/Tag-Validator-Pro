@@ -7,7 +7,6 @@ const { spawn } = require('child_process');
 const cors = require('cors');
 const cron = require('node-cron');
 const { v4: uuidv4 } = require('uuid');
-const nodemailer = require('nodemailer');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -192,61 +191,66 @@ app.get('/api/tag-validator/results-rich', (req, res) => {
     }
 });
 
-// --- Email alerts ---
+// --- Email alerts (Brevo HTTP API) ---
+// Sent over HTTPS:443, which cloud hosts allow — unlike SMTP ports 465/587
+// that Hugging Face Spaces block outright.
 const MAIL_CONFIG_FILE = path.join(__dirname, 'mail_config.json');
-
-// Gmail App Passwords are shown as "abcd efgh ijkl mnop" — the spaces are
-// presentational only and MUST be removed before authenticating.
-const cleanPass = p => String(p || '').replace(/\s+/g, '');
 
 function loadMailCreds() {
     // In-app config takes precedence; env vars are a fallback.
     if (fs.existsSync(MAIL_CONFIG_FILE)) {
         try {
             const c = JSON.parse(fs.readFileSync(MAIL_CONFIG_FILE, 'utf8'));
-            if (c.user && c.pass)
-                return { user: String(c.user).trim(), pass: cleanPass(c.pass) };
+            if (c.apiKey && c.sender)
+                return { apiKey: String(c.apiKey).trim(), sender: String(c.sender).trim() };
         } catch { /* ignore */ }
     }
-    if (process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD)
-        return { user: process.env.GMAIL_USER.trim(), pass: cleanPass(process.env.GMAIL_APP_PASSWORD) };
+    if (process.env.BREVO_API_KEY && process.env.BREVO_SENDER)
+        return { apiKey: process.env.BREVO_API_KEY.trim(), sender: process.env.BREVO_SENDER.trim() };
     return null;
 }
 
-function makeTransport(creds, port) {
-    // Timeouts are critical: without them a blocked SMTP port (common on
-    // cloud hosts) makes the request hang forever ("Sending..." stuck).
-    return nodemailer.createTransport({
-        host: 'smtp.gmail.com',
-        port: port,
-        secure: port === 465,            // 465 = SSL, 587 = STARTTLS
-        requireTLS: port === 587,
-        auth: { user: creds.user, pass: creds.pass },
-        connectionTimeout: 12000,
-        greetingTimeout: 8000,
-        socketTimeout: 12000,
-        tls: { rejectUnauthorized: false },
-    });
-}
+async function sendViaBrevo(creds, message) {
+    const recipients = String(message.to || '')
+        .split(',').map(s => s.trim()).filter(Boolean)
+        .map(email => ({ email }));
+    if (!recipients.length) throw new Error('No recipient email configured');
 
-// Try SSL:465 first, then STARTTLS:587 (one is often blocked, not both).
-async function sendViaGmail(creds, message) {
-    const errors = [];
-    for (const port of [465, 587]) {
-        try {
-            await makeTransport(creds, port).sendMail(message);
-            return port;
-        } catch (e) {
-            errors.push(`port ${port}: ${(e && e.message) || e}`);
-        }
+    const payload = {
+        sender: { email: creds.sender, name: 'Tag Validator' },
+        to: recipients,
+        subject: message.subject,
+        htmlContent: message.html,
+    };
+    if (message.attachments && message.attachments.length) {
+        payload.attachment = message.attachments
+            .filter(a => a.path && fs.existsSync(a.path))
+            .map(a => ({ name: a.filename, content: fs.readFileSync(a.path).toString('base64') }));
     }
-    const blob = errors.join(' | ');
-    const blocked = /timeout|ETIMEDOUT|ECONNREFUSED|ESOCKET|ECONNECTION/i.test(blob);
-    throw new Error(
-        (blocked
-            ? 'Could not reach Gmail SMTP — the host is blocking outbound SMTP ports. '
-            : 'Gmail rejected the login. Use a 16-char App Password (2-Step Verification ON). ')
-        + blob);
+
+    let resp;
+    try {
+        resp = await fetch('https://api.brevo.com/v3/smtp/email', {
+            method: 'POST',
+            headers: {
+                'api-key': creds.apiKey,
+                'content-type': 'application/json',
+                'accept': 'application/json',
+            },
+            body: JSON.stringify(payload),
+            signal: AbortSignal.timeout(15000),
+        });
+    } catch (e) {
+        throw new Error('Could not reach Brevo API: ' + ((e && e.message) || e));
+    }
+    if (!resp.ok) {
+        const body = await resp.text().catch(() => '');
+        if (resp.status === 401)
+            throw new Error('Brevo rejected the API key — check it in Email Settings.');
+        if (resp.status === 400 && /sender/i.test(body))
+            throw new Error('Brevo: sender email is not a verified sender on your account. ' + body);
+        throw new Error(`Brevo API error ${resp.status}: ${body}`);
+    }
 }
 
 function mailerReady() {
@@ -255,16 +259,16 @@ function mailerReady() {
 
 app.get('/api/mail-config', (req, res) => {
     const c = loadMailCreds();
-    res.json({ configured: !!c, user: c ? c.user : '' });
+    res.json({ configured: !!c, sender: c ? c.sender : '' });
 });
 
 app.post('/api/mail-config', (req, res) => {
-    const { user, pass } = req.body || {};
-    if (!user || !pass)
-        return res.status(400).json({ error: 'Gmail address and App Password required' });
+    const { apiKey, sender } = req.body || {};
+    if (!apiKey || !sender)
+        return res.status(400).json({ error: 'Brevo API key and sender email required' });
     fs.writeFileSync(MAIL_CONFIG_FILE,
-        JSON.stringify({ user: user.trim(), pass: cleanPass(pass) }, null, 2));
-    res.json({ success: true, user: user.trim() });
+        JSON.stringify({ apiKey: String(apiKey).trim(), sender: String(sender).trim() }, null, 2));
+    res.json({ success: true, sender: String(sender).trim() });
 });
 
 app.delete('/api/mail-config', (req, res) => {
@@ -294,7 +298,7 @@ function analyzeFailures() {
 
 async function sendAlertEmail(recipients, label) {
     const creds = loadMailCreds();
-    if (!creds) throw new Error('Gmail not configured — set it in the app (Email Settings)');
+    if (!creds) throw new Error('Email not configured — set your Brevo API key in the app (Email Settings)');
     if (!recipients) throw new Error('No recipient email configured');
     const { failed, total } = analyzeFailures();
     const ok = total - failed.length;
@@ -319,8 +323,7 @@ async function sendAlertEmail(recipients, label) {
         <p style="color:#94a3b8;font-size:12px;margin-top:16px">Full report attached.</p>
       </div>`;
     const xlsxPath = path.join(__dirname, 'validation_results.xlsx');
-    await sendViaGmail(creds, {
-        from: `Tag Validator <${creds.user}>`,
+    await sendViaBrevo(creds, {
         to: recipients,
         subject: `[Tag Validator] Run complete — ${failed.length} failed of ${total}`,
         html,
@@ -407,8 +410,8 @@ function executeScheduledJob(schedule) {
                         console.log('[Scheduler] Email error:', e.message);
                     });
             } else if (recipient) {
-                if (idx !== -1) schedules[idx].lastStatus = 'Email skipped: GMAIL env not set';
-                console.log('[Scheduler] Email skipped: GMAIL_USER/GMAIL_APP_PASSWORD not set');
+                if (idx !== -1) schedules[idx].lastStatus = 'Email skipped: Brevo not configured';
+                console.log('[Scheduler] Email skipped: Brevo API key / sender not configured');
             }
             if (idx !== -1) {
                 schedules[idx].lastRun = new Date().toISOString();

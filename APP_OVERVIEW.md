@@ -32,7 +32,7 @@ It is a privacy & analytics QA tool for marketing/data teams.
 | Run the Python from Node | **child_process.spawn** | The browser work is in Python; the server is in Node. Node launches the Python script as a sub-process and streams its progress logs live to the UI. |
 | Excel read/write (server) | **xlsx** (SheetJS) | Lets the Node server read the result Excel to build the email failure summary and serve the download. |
 | Scheduling | **node-cron** | Runs validations automatically on a schedule (hourly / daily / weekly / monthly). Standard cron syntax, simple and dependable. |
-| Email alerts | **nodemailer (Gmail SMTP)** | Sends the report by email after each scheduled run. Gmail SMTP is free and easy; the app strips spaces from the Gmail App Password (a common cause of login failures) and uses `smtp.gmail.com:465` SSL for reliability. |
+| Email alerts | **Brevo HTTP API** | Sends the report by email after each scheduled run. Uses Brevo's transactional email API over HTTPS:443, so it works on hosts (e.g. Hugging Face Spaces) that block outbound SMTP ports 465/587. |
 | Unique IDs | **uuid** | Gives each saved schedule a unique ID. |
 | Frontend | **Plain HTML + CSS + vanilla JavaScript** | No framework. The UI is small (tables, tabs, forms), so plain JS keeps it fast, dependency-free, and easy to maintain — nothing to build or compile. |
 | Packaging | **Docker** | Bundles Node, Python, Chromium and all dependencies into one image so it runs the same everywhere. |
@@ -66,7 +66,7 @@ UI polls status, then shows results in tabs:
         │
         ▼
 (Optional) A schedule runs the same flow on a timer and
-nodemailer emails the report + failed-site list.
+the Brevo API emails the report + failed-site list.
 ```
 
 ---

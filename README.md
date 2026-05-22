@@ -28,13 +28,17 @@ under the Necessary (no-consent) scenario.
 
 When creating an automated schedule you can set an **alert email**. After every
 scheduled run a summary + the list of failed websites is emailed with the full
-Excel report attached. Email uses Gmail SMTP — set on the server:
+Excel report attached. Email uses the **Brevo HTTP API** (sends over HTTPS, so it
+works on hosts like Hugging Face Spaces that block SMTP ports).
+
+Configure it in the app (Scheduler tab → Email Settings) or via env vars:
 
 ```
-GMAIL_USER=youraddress@gmail.com
-GMAIL_APP_PASSWORD=your-16-char-app-password
+BREVO_API_KEY=xkeysib-your-api-key
+BREVO_SENDER=verified-sender@example.com
 ```
 
-(Generate an App Password: Google Account → Security → 2-Step Verification → App
-passwords. A normal Gmail password will not work.) Without these the run still
-completes; only the email is skipped. Use **Send Test Email** to verify setup.
+Get a free API key at app.brevo.com → SMTP & API → API Keys. The sender email
+must be a verified sender on your Brevo account (Senders & IP → Senders).
+Without these the run still completes; only the email is skipped. Use **Send
+Test Email** to verify setup.

@@ -207,8 +207,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const d = await (await fetch('/api/mail-config')).json();
             const el = document.getElementById('mailState');
             if (d.configured) {
-                el.innerHTML = `✅ Configured as <b style="color:#5eead4">${d.user}</b>`;
-                document.getElementById('gmailUser').value = d.user || '';
+                el.innerHTML = `✅ Sending as <b style="color:#5eead4">${d.sender}</b>`;
+                document.getElementById('brevoSender').value = d.sender || '';
             } else {
                 el.innerHTML = '⚠ Not configured — alerts will be skipped';
             }
@@ -216,25 +216,25 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     document.getElementById('saveMailBtn').onclick = async () => {
-        const user = document.getElementById('gmailUser').value.trim();
-        const pass = document.getElementById('gmailPass').value.trim();
+        const sender = document.getElementById('brevoSender').value.trim();
+        const apiKey = document.getElementById('brevoKey').value.trim();
         const flash = document.getElementById('schFlash');
-        if (!user || !pass) { flash.style.color = '#f87171'; flash.innerText = 'Enter Gmail + App Password'; return; }
+        if (!sender || !apiKey) { flash.style.color = '#f87171'; flash.innerText = 'Enter sender email + Brevo API key'; return; }
         const r = await fetch('/api/mail-config', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ user, pass }),
+            body: JSON.stringify({ sender, apiKey }),
         });
         const j = await r.json();
         flash.style.color = r.ok ? '#5eead4' : '#f87171';
-        flash.innerText = r.ok ? 'Gmail saved' : ('Error: ' + j.error);
-        document.getElementById('gmailPass').value = '';
+        flash.innerText = r.ok ? 'Email settings saved' : ('Error: ' + j.error);
+        document.getElementById('brevoKey').value = '';
         refreshMailState();
     };
 
     document.getElementById('clearMailBtn').onclick = async () => {
         await fetch('/api/mail-config', { method: 'DELETE' });
-        document.getElementById('gmailUser').value = '';
-        document.getElementById('gmailPass').value = '';
+        document.getElementById('brevoSender').value = '';
+        document.getElementById('brevoKey').value = '';
         refreshMailState();
     };
 
