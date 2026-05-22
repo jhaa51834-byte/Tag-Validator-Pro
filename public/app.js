@@ -59,6 +59,20 @@ async function loadRich() {
 const SRC_CLASS = { 'Tealium': 'src-teal', 'Adobe': 'src-adobe', 'GTM / gtag': 'src-gtm', 'Hardcoded': 'src-hard' };
 const srcChip = s => `<span class="src ${SRC_CLASS[s] || 'src-hard'}">${s}</span>`;
 
+// --- THEME TOGGLE ---
+function applyTheme(theme) {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('tv-theme', theme);
+    document.querySelectorAll('#themeToggle button').forEach(b =>
+        b.classList.toggle('active', b.dataset.themeSet === theme));
+}
+document.addEventListener('DOMContentLoaded', () => {
+    applyTheme(localStorage.getItem('tv-theme') || 'dark');
+    const toggle = document.getElementById('themeToggle');
+    if (toggle) toggle.querySelectorAll('button').forEach(b =>
+        b.onclick = () => applyTheme(b.dataset.themeSet));
+});
+
 document.addEventListener('DOMContentLoaded', () => {
     // --- MANUAL TAB LOGIC ---
     const uploadBoxM = document.getElementById('uploadBoxManual');
@@ -228,7 +242,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 const B = v => v === 'PASS' ? '<span class="badge b-pass">PASS</span>' : '<span class="badge b-fail">FAIL</span>';
-const ID = v => v ? '<span class="mono">' + v + '</span>' : '<span style="color:#d1d5db">--</span>';
+const ID = v => v ? '<span class="mono">' + v + '</span>' : '<span style="color:var(--muted)">--</span>';
 
 async function loadResults() {
     const r = await fetch('/api/tag-validator/results');
