@@ -11,3 +11,12 @@ schedule.json
 schedules.json
 mail_config.json
 package-lock.json
+ai_config.json
+click_results.json
+crawled_urls.xlsx
+sdr_input.xlsx
+ai_input.xlsx
+ai_results.xlsx
+ai_results.json
+ai_crawled.xlsx
+.claude/

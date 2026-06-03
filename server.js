@@ -7,6 +7,7 @@ const { spawn } = require('child_process');
 const cors = require('cors');
 const cron = require('node-cron');
 const { v4: uuidv4 } = require('uuid');
+const registerAiRoutes = require('./ai_assistant');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -59,6 +60,34 @@ app.post('/api/tag-validator/upload', upload.single('file'), (req, res) => {
     const targetPath = path.join(__dirname, 'input_sites.xlsx');
     fs.copyFileSync(req.file.path, targetPath);
     res.json({ success: true, originalName: req.file.originalname });
+});
+
+// Single-URL quick run: create a temp Excel with one URL and run the validator
+app.post('/api/tag-validator/run-single', (req, res) => {
+    if (validatorProcess) return res.status(400).json({ error: 'Running' });
+    const { url, mode } = req.body || {};
+    if (!url) return res.status(400).json({ error: 'URL required' });
+
+    // Write a single-URL Excel file
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet([['URL'], [url.trim()]]);
+    XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
+    XLSX.writeFile(wb, path.join(__dirname, 'input_sites.xlsx'));
+
+    const auditMode = mode || 'tealium';
+    lastRunMode = auditMode;
+    cancelRequested = false;
+    validatorLogs = [`Quick Run: ${url} (${auditMode.toUpperCase()} MODE)...`];
+    const pyCmd = process.platform === 'win32' ? 'python' : 'python3';
+    validatorProcess = spawn(pyCmd, ['-u', 'bulk_tag_validator.py', '--mode', auditMode], { cwd: __dirname });
+
+    validatorProcess.stdout.on('data', d => validatorLogs.push(d.toString().trim()));
+    validatorProcess.stderr.on('data', d => validatorLogs.push("ERROR: " + d.toString().trim()));
+    validatorProcess.on('close', code => {
+        validatorLogs.push(cancelRequested ? 'Run cancelled.' : `Finished with code ${code}`);
+        validatorProcess = null;
+    });
+    res.json({ success: true });
 });
 
 app.post('/api/tag-validator/run', (req, res) => {
@@ -190,6 +219,10 @@ app.get('/api/tag-validator/results-rich', (req, res) => {
         res.json({ results: [], scenarios: [] });
     }
 });
+
+
+
+
 
 // --- Email alerts (Brevo HTTP API) ---
 // Sent over HTTPS:443, which cloud hosts allow — unlike SMTP ports 465/587
@@ -499,5 +532,8 @@ app.get('/api/schedule/download/:filename', (req, res) => {
 });
 
 initCronJobs();
+
+// --- AI Assistant (Groq chatbot) ---
+registerAiRoutes(app, { rootDir: __dirname });
 
 app.listen(PORT, () => console.log(`Tag Validator running at http://localhost:${PORT}`));

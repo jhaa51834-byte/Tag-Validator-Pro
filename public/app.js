@@ -5,10 +5,48 @@ let richResults = [];                 // per-scenario pixel data (source attribu
 let scenarioList = ['Accept All', 'Reject All', 'Performance', 'Functional', 'Targeting'];
 let currentScenario = 'Accept All';
 
+function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function colorizeLogLines(logs) {
+    return logs.map(l => {
+        const text = String(l);
+        let colorStyle = '';
+        if (text.includes('ERROR') || text.includes('failed') || text.includes('failed with code') || text.includes('rejected')) {
+            colorStyle = 'color: #f87171; text-shadow: 0 0 6px rgba(248, 113, 113, 0.4);';
+        } else if (text.includes('WARNING') || text.includes('WARN')) {
+            colorStyle = 'color: #fbbf24; text-shadow: 0 0 6px rgba(251, 191, 36, 0.4);';
+        } else if (text.includes('SUCCESS') || text.includes('Finished') || text.includes('Completed') || text.includes('Saved report')) {
+            colorStyle = 'color: #34d399; text-shadow: 0 0 6px rgba(52, 211, 153, 0.4);';
+        } else if (text.includes('[Crawl]') || text.includes('CRAWLING') || text.includes('Discovering')) {
+            colorStyle = 'color: #22d3ee; text-shadow: 0 0 6px rgba(34, 211, 238, 0.4);';
+        } else if (text.includes('[Audit]') || text.includes('Auditing') || text.includes('Quick Run:')) {
+            colorStyle = 'color: #c084fc; text-shadow: 0 0 6px rgba(192, 132, 252, 0.4);';
+        }
+        
+        const styleAttr = colorStyle ? ` style="${colorStyle}"` : '';
+        return `<div${styleAttr}>${escapeHtml(text)}</div>`;
+    }).join('');
+}
+
+function formatSingleGa4Event(e) {
+    if (!e) return '<span style="color:#64748b">--</span>';
+    const measId = e.measurement_id ? `<span class="badge" style="background:rgba(59,130,246,0.12);color:#60a5fa;border:1px solid rgba(59,130,246,0.35);margin-bottom:4px;display:inline-block;font-family:monospace;font-size:0.65rem;">${e.measurement_id}</span>` : '';
+    let s = `<div style="margin-bottom:4px;">${measId}<br><b style="color:#4ade80">${e.event}</b></div>`;
+    const pkeys = Object.keys(e.params || {});
+    if (pkeys.length) {
+        s += `<div class="event-params">` + 
+             pkeys.map(k => `<div style="margin-bottom:2px; word-break:break-all;"><span style="color:#94a3b8">${k}</span>: <span style="color:#38bdf8">${e.params[k]}</span></div>`).join('') + 
+             `</div>`;
+    }
+    return s;
+}
+
 function switchTab(tabId) {
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
     document.querySelector(`[onclick="switchTab('${tabId}')"]`).classList.add('active');
-    
+
     document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
     document.getElementById(`tab-${tabId}`).classList.add('active');
 
@@ -56,8 +94,9 @@ async function loadRich() {
     } catch { richResults = []; }
 }
 
-const SRC_CLASS = { 'Tealium': 'src-teal', 'Adobe': 'src-adobe', 'GTM / gtag': 'src-gtm', 'Hardcoded': 'src-hard' };
+const SRC_CLASS = { 'Tealium': 'src-teal', 'Adobe': 'src-adobe', 'GTM / gtag': 'src-gtm', 'Hardcoded': 'src-hard', 'Detected (JS)': 'src-hard' };
 const srcChip = s => `<span class="src ${SRC_CLASS[s] || 'src-hard'}">${s}</span>`;
+
 
 // --- THEME TOGGLE ---
 function applyTheme(theme) {
@@ -116,8 +155,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const poll = setInterval(async () => {
             const r = await fetch('/api/tag-validator/status');
             const d = await r.json();
+            document.body.classList.toggle('audit-running', d.running);
             const logs = d.logs.filter(l => !l.includes('DeprecationWarning') && !l.includes('Pyarrow') && l.trim());
-            logBox.innerHTML = logs.map(l => '<div>' + l + '</div>').join('');
+            logBox.innerHTML = colorizeLogLines(logs);
             logBox.scrollTop = logBox.scrollHeight;
 
             const last = [...logs].reverse().find(l => l.match(/\[\d+\/\d+\]/));
@@ -131,6 +171,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             if (!d.running) {
+                document.body.classList.remove('audit-running');
                 clearInterval(poll);
                 runBtn.disabled = false;
                 runBtn.innerText = d.cancelled ? 'Cancelled — Run Again' : 'Run Again';
@@ -149,6 +190,65 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     downloadBtn.onclick = () => window.location.href = '/api/tag-validator/download';
+
+    // --- QUICK RUN (single URL) ---
+    const quickRunBtn = document.getElementById('quickRunBtn');
+    const singleUrlInput = document.getElementById('singleUrlInput');
+
+    quickRunBtn.onclick = async () => {
+        const url = singleUrlInput.value.trim();
+        if (!url) { alert('Paste a URL first (e.g. https://example.com)'); return; }
+
+        quickRunBtn.disabled = true;
+        quickRunBtn.innerText = '⚡ Running...';
+        runBtn.disabled = true;
+        cancelBtn.classList.remove('hidden');
+        cancelBtn.disabled = false;
+        cancelBtn.innerText = 'Cancel';
+        logBox.classList.remove('hidden');
+        document.getElementById('progressSection').classList.remove('hidden');
+
+        await fetch('/api/tag-validator/run-single', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url, mode: currentAuditMode })
+        });
+
+        const poll = setInterval(async () => {
+            const r = await fetch('/api/tag-validator/status');
+            const d = await r.json();
+            document.body.classList.toggle('audit-running', d.running);
+            const logs = d.logs.filter(l => !l.includes('DeprecationWarning') && !l.includes('Pyarrow') && l.trim());
+            logBox.innerHTML = colorizeLogLines(logs);
+            logBox.scrollTop = logBox.scrollHeight;
+
+            const last = [...logs].reverse().find(l => l.match(/\[\d+\/\d+\]/));
+            if (last) {
+                const m = last.match(/\[(\d+)\/(\d+)\]/);
+                if (m) {
+                    const c = +m[1], t = +m[2], pct = Math.round(c / t * 100);
+                    document.getElementById('progressLabel').innerText = c + '/' + t;
+                    document.getElementById('progressBar').style.width = pct + '%';
+                }
+            }
+
+            if (!d.running) {
+                document.body.classList.remove('audit-running');
+                clearInterval(poll);
+                quickRunBtn.disabled = false;
+                quickRunBtn.innerText = '⚡ Quick Run';
+                runBtn.disabled = false;
+                cancelBtn.classList.add('hidden');
+                loadResults();
+            }
+        }, 800);
+    };
+
+    // Allow pressing Enter in the URL input to trigger Quick Run
+    singleUrlInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') quickRunBtn.click();
+    });
+
     renderTable();
 
     // --- SCHEDULER TAB LOGIC ---
@@ -562,8 +662,9 @@ function pollDomainStatus(expectValidation) {
     dcPollHandle = setInterval(async () => {
         const r = await fetch('/api/tag-validator/status');
         const d = await r.json();
+        document.body.classList.toggle('audit-running', d.running);
         const logs = (d.logs || []).filter(l => !l.includes('DeprecationWarning') && !l.includes('Pyarrow') && l.trim());
-        logBox.innerHTML = logs.map(l => '<div>' + escapeHtml(l) + '</div>').join('');
+        logBox.innerHTML = colorizeLogLines(logs);
         logBox.scrollTop = logBox.scrollHeight;
 
         const last = [...logs].reverse().find(l => l.match(/\[\d+\/\d+\]/));
@@ -583,6 +684,7 @@ function pollDomainStatus(expectValidation) {
         }
 
         if (!d.running) {
+            document.body.classList.remove('audit-running');
             clearInterval(dcPollHandle);
             dcPollHandle = null;
 
@@ -616,7 +718,7 @@ async function loadDcCrawledUrls() {
         return;
     }
     body.innerHTML = urls.map((u, i) =>
-        `<tr><td>${i + 1}</td><td class="url-col" title="${escapeHtml(u)}"><a href="${escapeHtml(u)}" target="_blank" style="color:#a78bfa; text-decoration:none;">${escapeHtml(u)}</a></td></tr>`
+        `<tr><td>${i + 1}</td><td class="url-col" title="${escapeHtml(u)}"><a href="${escapeHtml(u)}" style="color:#a78bfa; text-decoration:none;">${escapeHtml(u)}</a></td></tr>`
     ).join('');
     document.getElementById('downloadUrlsBtn').classList.remove('hidden');
     document.getElementById('validateDiscoveredBtn').classList.remove('hidden');
@@ -768,3 +870,229 @@ function renderDcTable() {
         }
     }).join('');
 }
+
+
+
+// =============== AI ASSISTANT CHAT ===============
+let chatHistory = [];          // [{role:'user'|'assistant', content}]
+let chatSending = false;
+let chatAbort = null;          // AbortController for the in-flight request
+
+function setChatSendMode(sending) {
+    const btn = document.getElementById('chatSend');
+    if (sending) {
+        btn.classList.add('stop');
+        btn.innerHTML = '■';
+        btn.title = 'Cancel response';
+    } else {
+        btn.classList.remove('stop');
+        btn.innerHTML = '➤';
+        btn.title = 'Send';
+    }
+}
+
+function cancelChat() {
+    if (chatAbort) chatAbort.abort();
+}
+
+// Minimal, safe markdown -> HTML (escapes everything first).
+function renderMarkdown(src) {
+    let s = String(src);
+    s = s.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+    s = s.replace(/```[\w]*\n?([\s\S]*?)```/g, (m, c) => `<pre>${c.replace(/\n$/, '')}</pre>`);
+    s = s.replace(/(^\|.+\|[ \t]*\n\|[-:\s|]+\|[ \t]*\n(?:\|.*\|[ \t]*\n?)*)/gm, block => {
+        const lines = block.trim().split('\n');
+        const cells = l => l.replace(/^\||\|$/g, '').split('|').map(x => x.trim());
+        const head = cells(lines[0]);
+        const rows = lines.slice(2).map(cells);
+        let h = '<table><thead><tr>' + head.map(c => `<th>${c}</th>`).join('') + '</tr></thead><tbody>';
+        h += rows.map(r => '<tr>' + r.map(c => `<td>${c}</td>`).join('') + '</tr>').join('');
+        return h + '</tbody></table>';
+    });
+    s = s.replace(/`([^`]+)`/g, '<code>$1</code>');
+    s = s.replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>');
+    s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+|\/[^\s)]+)\)/g,
+        '<a href="$2" rel="noopener">$1</a>');
+    // auto-linkify bare assistant download paths
+    s = s.replace(/(?<!["'>= ])(\/api\/ai\/download\/(?:results|crawled))/g,
+        '<a href="$1" rel="noopener">Download file</a>');
+    s = s.replace(/(?:^|\n)((?:[-*] .+(?:\n|$))+)/g, (m, blk) => {
+        const items = blk.trim().split('\n').map(l => `<li>${l.replace(/^[-*]\s+/, '')}</li>`).join('');
+        return `<ul style="margin:6px 0 6px 18px">${items}</ul>`;
+    });
+    s = s.replace(/\n/g, '<br>');
+    s = s.replace(/<br>(\s*<(?:table|thead|tbody|tr|ul|pre|\/))/g, '$1');
+    return s;
+}
+
+function addChatMessage(role, content, type) {
+    const body = document.getElementById('chatBody');
+    const div = document.createElement('div');
+    div.className = 'chat-msg ' + (type || role);
+    div.innerHTML = role === 'bot' ? renderMarkdown(content) : escapeHtml(content);
+    body.appendChild(div);
+    body.scrollTop = body.scrollHeight;
+    return div;
+}
+
+function showChatTyping() {
+    const panel = document.getElementById('chatPanel');
+    if (panel) panel.classList.add('agent-talking');
+    const body = document.getElementById('chatBody');
+    const div = document.createElement('div');
+    div.className = 'chat-typing';
+    div.id = 'chatTyping';
+    div.innerHTML = '<span></span><span></span><span></span>';
+    body.appendChild(div);
+    body.scrollTop = body.scrollHeight;
+}
+function hideChatTyping() {
+    const panel = document.getElementById('chatPanel');
+    if (panel) panel.classList.remove('agent-talking');
+    const t = document.getElementById('chatTyping');
+    if (t) t.remove();
+}
+
+async function sendChatMessage(text) {
+    text = (text || '').trim();
+    if (!text || chatSending) return;
+    chatSending = true;
+    setChatSendMode(true);
+
+    addChatMessage('user', text);
+    chatHistory.push({ role: 'user', content: text });
+    const input = document.getElementById('chatInput');
+    input.value = '';
+    input.style.height = '42px';
+    showChatTyping();
+
+    chatAbort = new AbortController();
+    try {
+        const r = await fetch('/api/ai/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ messages: chatHistory }),
+            signal: chatAbort.signal,
+        });
+        const d = await r.json();
+        hideChatTyping();
+        if (!r.ok) {
+            addChatMessage('bot', '⚠ ' + (d.error || 'Something went wrong.'), 'note');
+        } else {
+            addChatMessage('bot', d.reply);
+            chatHistory.push({ role: 'assistant', content: d.reply });
+        }
+    } catch (e) {
+        hideChatTyping();
+        if (e.name === 'AbortError') {
+            addChatMessage('bot', 'Okay, cancelled that one. 👍 Ask me whenever you\u2019re ready.', 'note');
+        } else {
+            addChatMessage('bot', '⚠ Network error: ' + e.message, 'note');
+        }
+    } finally {
+        chatSending = false;
+        chatAbort = null;
+        setChatSendMode(false);
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const fab = document.getElementById('chatFab');
+    const panel = document.getElementById('chatPanel');
+    const input = document.getElementById('chatInput');
+    if (!fab) return;
+
+    async function refreshGroqState() {
+        try {
+            const d = await (await fetch('/api/ai/config')).json();
+            const el = document.getElementById('groqState');
+            if (!d.configured) {
+                el.innerHTML = '⚠ No API key yet — add a Groq and/or Gemini key.';
+            } else {
+                const parts = [];
+                if (d.groq) parts.push('Groq ✅');
+                if (d.gemini) parts.push('Gemini ✅ (fallback)');
+                el.innerHTML = 'Assistant ready — ' + parts.join(' · ');
+            }
+        } catch { /* ignore */ }
+    }
+
+    function greet() {
+        if (document.getElementById('chatBody').children.length) return;
+        addChatMessage('bot', "Hey! I'm **Tagly** 👋 your web-analytics assistant. I can:\n\n"
+            + "- Audit any URL — **GTM, GA4, Adobe, Tealium**, IDs, report suites, page-view tags\n"
+            + "- Check **marketing pixels** across consent scenarios\n"
+            + "- **Crawl a whole domain** into an Excel of page URLs\n"
+            + "- Explain **how to fix** tagging issues with examples\n\n"
+            + "What are we looking at today?");
+    }
+
+    const bubble = document.getElementById('chatBubble');
+    function hideBubble() { if (bubble) bubble.classList.add('hidden'); }
+
+    function openChat() {
+        panel.classList.add('open');
+        fab.classList.add('hidden');
+        hideBubble();
+        greet();
+        refreshGroqState();
+        input.focus();
+    }
+    fab.onclick = openChat;
+    if (bubble) {
+        bubble.onclick = openChat;
+        const bc = document.getElementById('chatBubbleClose');
+        if (bc) bc.onclick = (e) => { e.stopPropagation(); hideBubble(); };
+    }
+    document.getElementById('chatCloseBtn').onclick = () => {
+        panel.classList.remove('open');
+        fab.classList.remove('hidden');
+    };
+    document.getElementById('chatClearBtn').onclick = () => {
+        chatHistory = [];
+        document.getElementById('chatBody').innerHTML = '';
+        greet();
+    };
+    document.getElementById('chatSettingsBtn').onclick = () => {
+        document.getElementById('chatSettings').classList.toggle('open');
+        refreshGroqState();
+    };
+
+    document.getElementById('saveGroqBtn').onclick = async () => {
+        const apiKey = document.getElementById('groqKeyInput').value.trim();
+        const geminiKey = document.getElementById('geminiKeyInput').value.trim();
+        if (!apiKey && !geminiKey) return;
+        const body = {};
+        if (apiKey) body.apiKey = apiKey;
+        if (geminiKey) body.geminiKey = geminiKey;
+        const r = await fetch('/api/ai/config', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+        });
+        document.getElementById('groqKeyInput').value = '';
+        document.getElementById('geminiKeyInput').value = '';
+        if (r.ok) document.getElementById('chatSettings').classList.remove('open');
+        refreshGroqState();
+    };
+    document.getElementById('clearGroqBtn').onclick = async () => {
+        await fetch('/api/ai/config', { method: 'DELETE' });
+        document.getElementById('groqKeyInput').value = '';
+        document.getElementById('geminiKeyInput').value = '';
+        refreshGroqState();
+    };
+
+    document.getElementById('chatSend').onclick = () => {
+        if (chatSending) cancelChat();
+        else sendChatMessage(input.value);
+    };
+    input.addEventListener('keydown', e => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            if (!chatSending) sendChatMessage(input.value);
+        }
+    });
+    input.addEventListener('input', () => {
+        input.style.height = '42px';
+        input.style.height = Math.min(input.scrollHeight, 100) + 'px';
+    });
+});
